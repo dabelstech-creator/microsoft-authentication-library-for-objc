@@ -1,0 +1,35 @@
+
+name: MSAL iOS Package Validation
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+    branches: ["**"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-msal-package:
+    name: Resolve and build MSAL package
+    runs-on: macos-15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Select Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
+          xcodebuild -version
+          swift --version
+
+      - name: Validate Swift package manifest
+        run: swift package dump-package
+
+      - name: Resolve package dependencies
+        run: swift package resolve
+
+      - name: Build package
+        run: swift build -v
