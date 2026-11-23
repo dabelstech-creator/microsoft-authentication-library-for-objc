@@ -191,6 +191,21 @@ enum AuthSessionVault {
         }
     }
 
+    static func deleteRefreshToken() throws {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        if let group = Bundle.main.object(forInfoDictionaryKey: "CredentialKeychainAccessGroup") as? String {
+            query[kSecAttrAccessGroup as String] = group
+        }
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
+            throw AuthSessionVaultError.keychain(status)
+        }
+    }
+
     static func refreshToken() throws -> String? {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
