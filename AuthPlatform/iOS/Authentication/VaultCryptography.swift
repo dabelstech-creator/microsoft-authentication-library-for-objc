@@ -3,6 +3,16 @@ import Foundation
 import Security
 
 /// Client-side vault cryptography. The server receives only AES-GCM envelopes.
+
+/// Opaque client-encrypted record shared by the app, extension, and API client.
+struct EncryptedVaultItemEnvelope: Codable, Sendable, Equatable {
+    let clientItemID: UUID
+    let ciphertext: String
+    let nonce: String
+    let authenticationTag: String
+    let formatVersion: Int
+}
+
 enum VaultCryptography {
     static let formatVersion = 1
     private static let keychainService = "com.dabelstech.authplatform.vault-key"
@@ -17,11 +27,22 @@ enum VaultCryptography {
         let authenticationTag: String
     }
 
-    /// Create a random 256-bit master key and a one-time recovery code.
-    /// The caller must display the recovery code and require the user to save it safely.
+    /// Create a random 256-bit master key and a one-time recovery kit.
+    /// The caller must show the recovery code and let the user export the package.
     static func createVaultKey() throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
         guard !hasVaultKey() else { throw VaultError.keyAlreadyExists }
         let masterKey = SymmetricKey(size: .bits256)
+        try storeMasterKey(masterKey)
+        return try makeRecoveryKit(for: masterKey)
+    }
+
+    /// Generate a fresh recovery code/package for the existing local vault key.
+    /// This does not replace or rotate the vault key, so existing encrypted items remain readable.
+    static func createRecoveryKit() throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
+        try makeRecoveryKit(for: loadMasterKey())
+    }
+
+    private static func makeRecoveryKit(for masterKey: SymmetricKey) throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
         let recoveryBytes = try secureRandom(count: 32)
         let recoveryCode = recoveryBytes.base64URLEncodedString()
         let salt = try secureRandom(count: 16)
@@ -38,7 +59,6 @@ enum VaultCryptography {
             ciphertext: sealed.ciphertext.base64EncodedString(),
             authenticationTag: sealed.tag.base64EncodedString()
         )
-        try storeMasterKey(masterKey)
         return (recoveryCode, package)
     }
 
@@ -51,6 +71,7 @@ enum VaultCryptography {
               let nonceData = Data(base64Encoded: package.nonce),
               nonceData.count == 12,
               let ciphertext = Data(base64Encoded: package.ciphertext),
+              ciphertext.count == 32,
               let tag = Data(base64Encoded: package.authenticationTag),
               tag.count == 16,
               let nonce = try? AES.GCM.Nonce(data: nonceData)
