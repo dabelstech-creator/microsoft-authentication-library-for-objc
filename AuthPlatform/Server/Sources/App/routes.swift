@@ -67,6 +67,7 @@ private struct EncryptedVaultItemWriteRequest: Content {
     let nonce: String
     let authenticationTag: String
     let formatVersion: Int
+    let expectedVersion: Int?
 }
 
 private struct EncryptedVaultItemResponse: Content {
@@ -75,6 +76,7 @@ private struct EncryptedVaultItemResponse: Content {
     let nonce: String
     let authenticationTag: String
     let formatVersion: Int
+    let version: Int
     let createdAt: Date?
     let updatedAt: Date?
     let deletedAt: Date?
@@ -86,11 +88,18 @@ private struct EncryptedVaultItemResponse: Content {
         nonce = item.nonce
         authenticationTag = item.authenticationTag
         formatVersion = item.formatVersion
+        version = item.version
         createdAt = item.createdAt
         updatedAt = item.updatedAt
         deletedAt = item.deletedAt
         isDeleted = item.deletedAt != nil
     }
+}
+
+private struct EncryptedVaultItemPage: Content {
+    let items: [EncryptedVaultItemResponse]
+    let nextOffset: Int?
+    let snapshot: String
 }
 
 private struct ResendEmailPayload: Content {
@@ -980,16 +989,47 @@ func routes(_ app: Application) throws {
         return .noContent
     }
 
-    // Encrypted vault synchronization. The API stores opaque client-encrypted
-    // AES-GCM envelopes and never receives or derives a vault decryption key.
-    app.get("v1", "vault", "items") { request async throws -> [EncryptedVaultItemResponse] in
+    // Versioned, paginated encrypted vault synchronization. The server stores
+    // opaque client-encrypted AES-GCM envelopes and never receives a decryption key.
+    app.get("v1", "vault", "items") { request async throws -> EncryptedVaultItemPage in
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id else { throw Abort(.internalServerError) }
+
+        let limit = try request.query.get(Int.self, at: "limit") ?? 100
+        let offset = try request.query.get(Int.self, at: "offset") ?? 0
+        guard (1...200).contains(limit), offset >= 0 else {
+            throw Abort(.badRequest, reason: "Vault pagination requires limit 1...200 and a non-negative offset.")
+        }
+
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let snapshot: Date
+        if let rawSnapshot = try request.query.get(String.self, at: "snapshot") {
+            guard let parsed = formatter.date(from: rawSnapshot) else {
+                throw Abort(.badRequest, reason: "Vault snapshot cursor is invalid.")
+            }
+            snapshot = parsed
+        } else {
+            snapshot = Date()
+        }
+
+        // created_at is immutable and tombstones remain in the table, so offset
+        // pagination is stable within this snapshot even when an item is updated.
         let items = try await EncryptedVaultItem.query(on: request.db)
             .filter(\.$userID == userID)
-            .sort(\.$updatedAt, .descending)
+            .filter(\.$createdAt <= snapshot)
+            .sort(\.$createdAt, .ascending)
+            .sort(\.$id, .ascending)
+            .range(offset..<(offset + limit + 1))
             .all()
-        return items.map(EncryptedVaultItemResponse.init)
+
+        let hasMore = items.count > limit
+        let pageItems = Array(items.prefix(limit)).map(EncryptedVaultItemResponse.init)
+        return EncryptedVaultItemPage(
+            items: pageItems,
+            nextOffset: hasMore ? offset + limit : nil,
+            snapshot: formatter.string(from: snapshot)
+        )
     }
 
     app.post("v1", "vault", "items") { request async throws -> Response in
@@ -1009,23 +1049,54 @@ func routes(_ app: Application) throws {
             throw Abort(.unprocessableEntity, reason: "Vault item must contain a base64 AES-GCM ciphertext, 12-byte nonce, and 16-byte authentication tag.")
         }
 
-        let existing = try await EncryptedVaultItem.query(on: request.db)
-            .filter(\.$userID == userID)
-            .filter(\.$clientItemID == input.clientItemID)
-            .first()
-        if existing?.deletedAt != nil {
-            throw Abort(.conflict, reason: "A deleted vault item ID cannot be reused. Restore it as a new item with a new ID.")
-        }
-        let item = existing ?? EncryptedVaultItem()
-        item.userID = userID
-        item.clientItemID = input.clientItemID
-        item.ciphertext = input.ciphertext
-        item.nonce = input.nonce
-        item.authenticationTag = input.authenticationTag
-        item.formatVersion = input.formatVersion
-        try await item.save(on: request.db)
+        let item = try await request.db.transaction { database -> EncryptedVaultItem in
+            guard let sql = database as? SQLDatabase else {
+                throw Abort(.internalServerError, reason: "Versioned vault writes require PostgreSQL.")
+            }
+            _ = try await sql.raw("""
+                SELECT id FROM encrypted_vault_items
+                WHERE user_id = \(bind: userID) AND client_item_id = \(bind: input.clientItemID)
+                FOR UPDATE
+                """).all()
 
-        let response = Response(status: existing == nil ? .created : .ok)
+            let existing = try await EncryptedVaultItem.query(on: database)
+                .filter(\.$userID == userID)
+                .filter(\.$clientItemID == input.clientItemID)
+                .first()
+
+            if let existing {
+                guard existing.deletedAt == nil else {
+                    throw Abort(.conflict, reason: "A deleted vault item ID cannot be reused. Restore it as a new item with a new ID.")
+                }
+                guard let expectedVersion = input.expectedVersion,
+                      expectedVersion == existing.version else {
+                    throw Abort(.conflict, reason: "Vault item version conflict. Fetch the latest item before retrying.")
+                }
+                existing.ciphertext = input.ciphertext
+                existing.nonce = input.nonce
+                existing.authenticationTag = input.authenticationTag
+                existing.formatVersion = input.formatVersion
+                existing.version += 1
+                try await existing.save(on: database)
+                return existing
+            }
+
+            guard input.expectedVersion == nil || input.expectedVersion == 0 else {
+                throw Abort(.conflict, reason: "Vault item does not exist at the expected version. Refresh the vault before retrying.")
+            }
+            let created = EncryptedVaultItem()
+            created.userID = userID
+            created.clientItemID = input.clientItemID
+            created.ciphertext = input.ciphertext
+            created.nonce = input.nonce
+            created.authenticationTag = input.authenticationTag
+            created.formatVersion = input.formatVersion
+            created.version = 1
+            try await created.save(on: database)
+            return created
+        }
+
+        let response = Response(status: item.version == 1 ? .created : .ok)
         try response.content.encode(EncryptedVaultItemResponse(item))
         return response
     }
@@ -1048,15 +1119,34 @@ func routes(_ app: Application) throws {
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id,
               let clientItemID = request.parameters.get("clientItemID", as: UUID.self),
-              let item = try await EncryptedVaultItem.query(on: request.db)
+              let expectedVersion = request.headers.first(name: "If-Match").flatMap(Int.init)
+        else {
+            throw Abort(.badRequest, reason: "A numeric If-Match item version is required for deletion.")
+        }
+
+        try await request.db.transaction { database in
+            guard let sql = database as? SQLDatabase else {
+                throw Abort(.internalServerError, reason: "Versioned vault deletion requires PostgreSQL.")
+            }
+            _ = try await sql.raw("""
+                SELECT id FROM encrypted_vault_items
+                WHERE user_id = \(bind: userID) AND client_item_id = \(bind: clientItemID)
+                FOR UPDATE
+                """).all()
+            guard let item = try await EncryptedVaultItem.query(on: database)
                 .filter(\.$userID == userID)
                 .filter(\.$clientItemID == clientItemID)
                 .first()
-        else {
-            throw Abort(.notFound, reason: "Vault item was not found.")
+            else { throw Abort(.notFound, reason: "Vault item was not found.") }
+
+            if item.deletedAt != nil { return }
+            guard item.version == expectedVersion else {
+                throw Abort(.conflict, reason: "Vault item version conflict. Fetch the latest item before deleting.")
+            }
+            item.deletedAt = Date()
+            item.version += 1
+            try await item.save(on: database)
         }
-        item.deletedAt = Date()
-        try await item.save(on: request.db)
         return .noContent
     }
 
