@@ -45,6 +45,7 @@ targets:
     sources:
       - path: CredentialProviderExtension
       - path: Authentication/SharedCredentialVault.swift
+      - path: Authentication/VaultCryptography.swift
       - path: Authentication/ApplePasswordManagerResources.swift
       - path: Resources/ApplePasswordManager
         buildPhase: resources
@@ -57,3 +58,15 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.dabelstech.authplatform.CredentialProviderExtension
         PRODUCT_NAME: CredentialProviderExtension
         APPLICATION_EXTENSION_API_ONLY: YES
+
+
+  AuthPlatformTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: AuthPlatform
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dabelstech.authplatform.tests
