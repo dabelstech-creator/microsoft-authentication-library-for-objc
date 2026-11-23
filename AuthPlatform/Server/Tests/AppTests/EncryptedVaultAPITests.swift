@@ -10,6 +10,7 @@ private struct EncryptedVaultItemPayload: Content {
     let nonce: String
     let authenticationTag: String
     let formatVersion: Int
+    let expectedVersion: Int? = nil
 }
 
 private struct EncryptedVaultItemResponse: Content {
@@ -18,6 +19,7 @@ private struct EncryptedVaultItemResponse: Content {
     let nonce: String
     let authenticationTag: String
     let formatVersion: Int
+    let version: Int
     let deletedAt: Date?
     let isDeleted: Bool
 }
@@ -126,6 +128,7 @@ final class EncryptedVaultAPITests: XCTestCase {
 
         try await app.test(.DELETE, "v1/vault/items/\(itemID)", beforeRequest: { request in
             request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
+            request.headers.replaceOrAdd(name: "If-Match", value: "1")
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .noContent)
         })
