@@ -16,6 +16,7 @@ func configure(_ app: Application) async throws {
     app.migrations.add(AddRefreshTokenHistory())
     app.migrations.add(AddAuthSecurityTables())
     app.migrations.add(CreateEncryptedVaultItems())
+    app.migrations.add(AddEncryptedVaultItemVersion())
     app.middleware.use(AuthRateLimitMiddleware(maximumRequests: 120, windowSeconds: 60))
     try routes(app)
 }
