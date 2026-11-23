@@ -197,12 +197,19 @@ private struct AuthenticationDemoView: View {
     }
 
     private func restoreSession() async {
-        guard !signedIn, let refreshToken = try? AuthSessionVault.refreshToken(),
-              let refreshToken, !refreshToken.isEmpty else { return }
+        guard !signedIn else { return }
+        let storedRefreshToken: String
+        do {
+            guard let token = try AuthSessionVault.refreshToken(), !token.isEmpty else { return }
+            storedRefreshToken = token
+        } catch {
+            status = "Could not read the saved session: \(error.localizedDescription)"
+            return
+        }
         isBusy = true
         defer { isBusy = false }
         do {
-            let tokens = try await AuthPlatformAPI().refresh(refreshToken: refreshToken)
+            let tokens = try await AuthPlatformAPI().refresh(refreshToken: storedRefreshToken)
             try AuthSessionVault.save(refreshToken: tokens.refreshToken)
             currentAccessToken = tokens.accessToken
             signedIn = tokens.emailVerified
