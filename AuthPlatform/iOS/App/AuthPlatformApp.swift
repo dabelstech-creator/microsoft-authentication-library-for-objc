@@ -285,8 +285,17 @@ private struct AuthenticationDemoView: View {
                 return
             }
             let api = try AuthPlatformAPI()
-            _ = try await api.saveVaultItem(envelope, accessToken: currentAccessToken)
-            status = "Credential encrypted, saved locally, and synchronized to your account."
+            let existing = try await api.listVaultItems(accessToken: currentAccessToken)
+                .first(where: { $0.clientItemID == envelope.clientItemID })
+            if existing?.isDeleted == true {
+                throw AuthPlatformAPIError.rejected(409, "This item was deleted on another device. Save it as a new credential instead.")
+            }
+            _ = try await api.saveVaultItem(
+                envelope,
+                expectedVersion: existing?.version,
+                accessToken: currentAccessToken
+            )
+            status = "Credential encrypted, saved locally, and synchronized at the server's current item version."
         } catch {
             status = "Credential saved locally only or not saved: \(error.localizedDescription)"
         }
