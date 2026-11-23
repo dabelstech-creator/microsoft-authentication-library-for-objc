@@ -15,15 +15,6 @@ struct AuthTokenResponse: Decodable {
 }
 
 
-/// An opaque AES-GCM envelope. Callers must encrypt locally before sending it.
-struct EncryptedVaultItemEnvelope: Codable, Sendable {
-    let clientItemID: UUID
-    let ciphertext: String
-    let nonce: String
-    let authenticationTag: String
-    let formatVersion: Int
-}
-
 /// A server record. The API returns tombstones so clients can propagate deletions.
 struct EncryptedVaultItemRecord: Decodable, Sendable {
     let clientItemID: UUID
@@ -81,6 +72,15 @@ final class AuthPlatformAPI {
         return try JSONDecoder().decode(AuthTokenResponse.self, from: data)
     }
 
+
+    func logout(refreshToken: String) async throws {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent("auth").appendingPathComponent("logout"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RefreshRequest(refreshToken: refreshToken))
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+    }
 
     /// Fetches only the authenticated user's opaque encrypted vault records.
     func listVaultItems(accessToken: String) async throws -> [EncryptedVaultItemRecord] {
