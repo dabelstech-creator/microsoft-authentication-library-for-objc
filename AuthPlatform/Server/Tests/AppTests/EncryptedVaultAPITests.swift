@@ -244,7 +244,11 @@ final class EncryptedVaultAPITests: XCTestCase {
             request.headers.bearerAuthorization = BearerAuthorization(token: token)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
-            firstPage = try response.content.decode(EncryptedVaultItemPage.self)
+            do {
+                firstPage = try response.content.decode(EncryptedVaultItemPage.self)
+            } catch {
+                XCTFail("Could not decode first vault page: \\(error)")
+            }
         })
         let first = try XCTUnwrap(firstPage)
         XCTAssertEqual(first.items.count, 1)
@@ -255,7 +259,11 @@ final class EncryptedVaultAPITests: XCTestCase {
             request.headers.bearerAuthorization = BearerAuthorization(token: token)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
-            secondPage = try response.content.decode(EncryptedVaultItemPage.self)
+            do {
+                secondPage = try response.content.decode(EncryptedVaultItemPage.self)
+            } catch {
+                XCTFail("Could not decode second vault page: \\(error)")
+            }
         })
         let second = try XCTUnwrap(secondPage)
         XCTAssertEqual(second.items.count, 1)
