@@ -24,6 +24,12 @@ private struct EncryptedVaultItemResponse: Content {
     let isDeleted: Bool
 }
 
+private struct EncryptedVaultItemPage: Content {
+    let items: [EncryptedVaultItemResponse]
+    let nextOffset: Int?
+    let snapshot: String
+}
+
 final class EncryptedVaultAPITests: XCTestCase {
     func testVaultRejectsRequestsWithoutBearerSession() async throws {
         guard Environment.get("DATABASE_URL") != nil else {
@@ -191,4 +197,71 @@ final class EncryptedVaultAPITests: XCTestCase {
             }
         })
     }
+    func testVaultListUsesStableSnapshotPagination() async throws {
+        guard Environment.get("DATABASE_URL") != nil else {
+            throw XCTSkip("Set DATABASE_URL to a disposable PostgreSQL test database.")
+        }
+
+        let app = try await Application.make(.testing)
+        defer { app.shutdown() }
+        try await configure(app)
+        try await app.autoMigrate()
+
+        let user = User()
+        user.emailNormalized = "vault-pages-\\(UUID().uuidString.lowercased())@example.test"
+        user.emailVerifiedAt = Date()
+        user.passwordHash = "unused-by-vault-test"
+        try await user.save(on: app.db)
+
+        let token = secureToken()
+        let session = AuthSession()
+        session.userID = try XCTUnwrap(user.id)
+        session.familyID = UUID()
+        session.accessTokenHash = tokenDigest(token)
+        session.accessExpiresAt = Date().addingTimeInterval(900)
+        session.refreshTokenHash = tokenDigest(secureToken())
+        session.expiresAt = Date().addingTimeInterval(86_400)
+        try await session.save(on: app.db)
+
+        for index in 0..<2 {
+            let payload = EncryptedVaultItemPayload(
+                clientItemID: UUID(),
+                ciphertext: Data("ciphertext-\\(index)".utf8).base64EncodedString(),
+                nonce: Data(repeating: UInt8(index + 1), count: 12).base64EncodedString(),
+                authenticationTag: Data(repeating: UInt8(index + 2), count: 16).base64EncodedString(),
+                formatVersion: 1
+            )
+            try await app.test(.POST, "v1/vault/items", beforeRequest: { request in
+                request.headers.bearerAuthorization = BearerAuthorization(token: token)
+                try request.content.encode(payload)
+            }, afterResponse: { response async in
+                XCTAssertEqual(response.status, .created)
+            })
+        }
+
+        var firstPage: EncryptedVaultItemPage?
+        try await app.test(.GET, "v1/vault/items?limit=1&offset=0", beforeRequest: { request in
+            request.headers.bearerAuthorization = BearerAuthorization(token: token)
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .ok)
+            firstPage = try response.content.decode(EncryptedVaultItemPage.self)
+        })
+        let first = try XCTUnwrap(firstPage)
+        XCTAssertEqual(first.items.count, 1)
+        XCTAssertEqual(first.nextOffset, 1)
+
+        var secondPage: EncryptedVaultItemPage?
+        try await app.test(.GET, "v1/vault/items?limit=1&offset=1&snapshot=\\(first.snapshot)", beforeRequest: { request in
+            request.headers.bearerAuthorization = BearerAuthorization(token: token)
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .ok)
+            secondPage = try response.content.decode(EncryptedVaultItemPage.self)
+        })
+        let second = try XCTUnwrap(secondPage)
+        XCTAssertEqual(second.items.count, 1)
+        XCTAssertNil(second.nextOffset)
+        XCTAssertEqual(second.snapshot, first.snapshot)
+        XCTAssertNotEqual(first.items[0].clientItemID, second.items[0].clientItemID)
+    }
+
 }
