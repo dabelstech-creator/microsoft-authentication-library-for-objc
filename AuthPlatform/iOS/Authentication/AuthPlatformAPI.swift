@@ -15,14 +15,33 @@ struct AuthTokenResponse: Decodable {
 }
 
 
-/// A server record. The API returns tombstones so clients can propagate deletions.
+/// A versioned server record. Tombstones remain visible to every sync client.
 struct EncryptedVaultItemRecord: Decodable, Sendable {
     let clientItemID: UUID
     let ciphertext: String
     let nonce: String
     let authenticationTag: String
     let formatVersion: Int
+    let version: Int
+    let createdAt: Date?
+    let updatedAt: Date?
+    let deletedAt: Date?
     let isDeleted: Bool
+}
+
+private struct EncryptedVaultItemPage: Decodable {
+    let items: [EncryptedVaultItemRecord]
+    let nextOffset: Int?
+    let snapshot: String
+}
+
+private struct VaultWriteRequest: Encodable {
+    let clientItemID: UUID
+    let ciphertext: String
+    let nonce: String
+    let authenticationTag: String
+    let formatVersion: Int
+    let expectedVersion: Int?
 }
 
 enum AuthPlatformAPIError: LocalizedError {
@@ -82,21 +101,51 @@ final class AuthPlatformAPI {
         try Self.validate(response: response, data: data)
     }
 
-    /// Fetches only the authenticated user's opaque encrypted vault records.
+    /// Fetches all pages from one stable server snapshot.
     func listVaultItems(accessToken: String) async throws -> [EncryptedVaultItemRecord] {
-        var request = URLRequest(url: baseURL
+        let endpoint = baseURL
             .appendingPathComponent("v1")
             .appendingPathComponent("vault")
-            .appendingPathComponent("items"))
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        let (data, response) = try await session.data(for: request)
-        try Self.validate(response: response, data: data)
-        return try JSONDecoder().decode([EncryptedVaultItemRecord].self, from: data)
+            .appendingPathComponent("items")
+        var offset = 0
+        var snapshot: String?
+        var result: [EncryptedVaultItemRecord] = []
+
+        while true {
+            guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+                throw AuthPlatformAPIError.invalidResponse
+            }
+            var query = [
+                URLQueryItem(name: "limit", value: "100"),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+            if let snapshot {
+                query.append(URLQueryItem(name: "snapshot", value: snapshot))
+            }
+            components.queryItems = query
+            guard let url = components.url else { throw AuthPlatformAPIError.invalidResponse }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await session.data(for: request)
+            try Self.validate(response: response, data: data)
+            let page = try JSONDecoder().decode(EncryptedVaultItemPage.self, from: data)
+            result.append(contentsOf: page.items)
+            guard let nextOffset = page.nextOffset else { break }
+            guard nextOffset > offset else { throw AuthPlatformAPIError.invalidResponse }
+            offset = nextOffset
+            snapshot = page.snapshot
+        }
+        return result
     }
 
-    /// Uploads an already-encrypted envelope. Never pass plaintext credential data here.
-    func saveVaultItem(_ item: EncryptedVaultItemEnvelope, accessToken: String) async throws -> EncryptedVaultItemRecord {
+    /// Uploads a locally encrypted envelope with compare-and-swap version semantics.
+    func saveVaultItem(
+        _ item: EncryptedVaultItemEnvelope,
+        expectedVersion: Int? = nil,
+        accessToken: String
+    ) async throws -> EncryptedVaultItemRecord {
         var request = URLRequest(url: baseURL
             .appendingPathComponent("v1")
             .appendingPathComponent("vault")
@@ -104,14 +153,20 @@ final class AuthPlatformAPI {
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(item)
+        request.httpBody = try JSONEncoder().encode(VaultWriteRequest(
+            clientItemID: item.clientItemID,
+            ciphertext: item.ciphertext,
+            nonce: item.nonce,
+            authenticationTag: item.authenticationTag,
+            formatVersion: item.formatVersion,
+            expectedVersion: expectedVersion
+        ))
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
         return try JSONDecoder().decode(EncryptedVaultItemRecord.self, from: data)
     }
 
-    /// Creates a server-side tombstone so deletion can propagate to other devices.
-    func deleteVaultItem(clientItemID: UUID, accessToken: String) async throws {
+    func deleteVaultItem(clientItemID: UUID, expectedVersion: Int, accessToken: String) async throws {
         var request = URLRequest(url: baseURL
             .appendingPathComponent("v1")
             .appendingPathComponent("vault")
@@ -119,6 +174,7 @@ final class AuthPlatformAPI {
             .appendingPathComponent(clientItemID.uuidString))
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(String(expectedVersion), forHTTPHeaderField: "If-Match")
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
     }
