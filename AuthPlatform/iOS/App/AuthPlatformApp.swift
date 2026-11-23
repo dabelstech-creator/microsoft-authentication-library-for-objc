@@ -123,6 +123,10 @@ private struct AuthenticationDemoView: View {
                             Task { await unlockCredential() }
                         }
                         .disabled(isBusy || username.isEmpty)
+                        Button("Delete saved sign-in from all devices", role: .destructive) {
+                            Task { await deleteCredential() }
+                        }
+                        .disabled(isBusy || username.isEmpty)
                     }
 
                     Section("Session") {
@@ -367,6 +371,38 @@ private struct AuthenticationDemoView: View {
             status = "Unlocked \(credential.username) for \(credential.service). The Credential Provider can now offer it to AutoFill."
         } catch {
             status = "Unlock failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func deleteCredential() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            guard let credential = try SharedCredentialVault.credential(service: service, username: username) else {
+                status = "No saved credential exists for this account on this iPhone."
+                return
+            }
+            let localEnvelope = try SharedCredentialVault.encryptedItems().first { envelope in
+                let stored = try VaultCryptography.open(envelope, as: StoredPasswordCredential.self)
+                return stored.service == credential.service && stored.username.lowercased() == credential.username.lowercased()
+            }
+            if let localEnvelope, !currentAccessToken.isEmpty {
+                let api = try AuthPlatformAPI()
+                let remote = try await api.listVaultItems(accessToken: currentAccessToken)
+                    .first(where: { $0.clientItemID == localEnvelope.clientItemID })
+                if let remote, !remote.isDeleted {
+                    try await api.deleteVaultItem(
+                        clientItemID: remote.clientItemID,
+                        expectedVersion: remote.version,
+                        accessToken: currentAccessToken
+                    )
+                }
+            }
+            try SharedCredentialVault.delete(service: credential.service, username: credential.username)
+            SharedCredentialVault.refreshSystemCredentialIdentities { _ in }
+            status = "Credential deleted locally and its server tombstone synchronized where a remote copy existed."
+        } catch {
+            status = "Deletion was not completed: \(error.localizedDescription)"
         }
     }
 
