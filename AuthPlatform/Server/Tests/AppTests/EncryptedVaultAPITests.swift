@@ -105,6 +105,43 @@ final class EncryptedVaultAPITests: XCTestCase {
             }
         })
 
+        let staleUpdate = EncryptedVaultItemPayload(
+            clientItemID: itemID,
+            ciphertext: Data("stale-ciphertext".utf8).base64EncodedString(),
+            nonce: Data(repeating: 3, count: 12).base64EncodedString(),
+            authenticationTag: Data(repeating: 4, count: 16).base64EncodedString(),
+            formatVersion: 1,
+            expectedVersion: 0
+        )
+        try await app.test(.POST, "v1/vault/items", beforeRequest: { request in
+            request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
+            try request.content.encode(staleUpdate)
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .conflict, "Stale writes must not overwrite a newer vault version.")
+        })
+
+        let validUpdate = EncryptedVaultItemPayload(
+            clientItemID: itemID,
+            ciphertext: Data("updated-ciphertext".utf8).base64EncodedString(),
+            nonce: Data(repeating: 5, count: 12).base64EncodedString(),
+            authenticationTag: Data(repeating: 6, count: 16).base64EncodedString(),
+            formatVersion: 1,
+            expectedVersion: 1
+        )
+        try await app.test(.POST, "v1/vault/items", beforeRequest: { request in
+            request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
+            try request.content.encode(validUpdate)
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .ok)
+            do {
+                let updated = try response.content.decode(EncryptedVaultItemResponse.self)
+                XCTAssertEqual(updated.version, 2)
+                XCTAssertEqual(updated.ciphertext, validUpdate.ciphertext)
+            } catch {
+                XCTFail("Could not decode updated vault item response: \(error)")
+            }
+        })
+
         let otherUser = User()
         otherUser.emailNormalized = "other-\(UUID().uuidString.lowercased())@example.test"
         otherUser.emailVerifiedAt = Date()
@@ -128,7 +165,7 @@ final class EncryptedVaultAPITests: XCTestCase {
 
         try await app.test(.DELETE, "v1/vault/items/\(itemID)", beforeRequest: { request in
             request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
-            request.headers.replaceOrAdd(name: "If-Match", value: "1")
+            request.headers.replaceOrAdd(name: "If-Match", value: "2")
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .noContent)
         })
@@ -148,6 +185,7 @@ final class EncryptedVaultAPITests: XCTestCase {
                 let items = try response.content.decode([EncryptedVaultItemResponse].self)
                 XCTAssertEqual(items.count, 1)
                 XCTAssertTrue(items[0].isDeleted, "Deletion must leave a tombstone so another device cannot resurrect the item.")
+                XCTAssertEqual(items[0].version, 3)
             } catch {
                 XCTFail("Could not decode vault item list response: \(error)")
             }
