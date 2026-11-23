@@ -13,6 +13,7 @@ final class EncryptedVaultItem: Model, @unchecked Sendable {
     @Field(key: "nonce") var nonce: String
     @Field(key: "authentication_tag") var authenticationTag: String
     @Field(key: "format_version") var formatVersion: Int
+    @Field(key: "version") var version: Int
     @Timestamp(key: "created_at", on: .create) var createdAt: Date?
     @Timestamp(key: "updated_at", on: .update) var updatedAt: Date?
     @OptionalField(key: "deleted_at") var deletedAt: Date?
