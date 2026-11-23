@@ -22,9 +22,9 @@ enum VaultCryptography {
     static func createVaultKey() throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
         guard !hasVaultKey() else { throw VaultError.keyAlreadyExists }
         let masterKey = SymmetricKey(size: .bits256)
-        let recoveryBytes = secureRandom(count: 32)
+        let recoveryBytes = try secureRandom(count: 32)
         let recoveryCode = recoveryBytes.base64URLEncodedString()
-        let salt = secureRandom(count: 16)
+        let salt = try secureRandom(count: 16)
         let wrappingKey = deriveWrappingKey(recoveryCode: recoveryCode, salt: salt)
         let nonce = AES.GCM.Nonce()
         let sealed = try AES.GCM.seal(masterKey.withUnsafeBytes { Data($0) },
@@ -44,6 +44,7 @@ enum VaultCryptography {
 
     /// Restore a master key from the user-held recovery code and exported recovery package.
     static func restoreVaultKey(recoveryCode: String, package: RecoveryPackage) throws {
+        guard !hasVaultKey() else { throw VaultError.keyAlreadyExists }
         guard package.version == formatVersion,
               let salt = Data(base64Encoded: package.salt),
               salt.count == 16,
@@ -169,10 +170,10 @@ enum VaultCryptography {
         return query
     }
 
-    private static func secureRandom(count: Int) -> Data {
+    private static func secureRandom(count: Int) throws -> Data {
         var bytes = [UInt8](repeating: 0, count: count)
         let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
-        precondition(status == errSecSuccess, "Secure random generation failed")
+        guard status == errSecSuccess else { throw VaultError.randomGeneration(status) }
         return Data(bytes)
     }
 
@@ -184,6 +185,7 @@ enum VaultCryptography {
         case authenticationFailed
         case keyUnavailable(OSStatus)
         case keychain(OSStatus)
+        case randomGeneration(OSStatus)
 
         var errorDescription: String? {
             switch self {
@@ -194,6 +196,7 @@ enum VaultCryptography {
             case .authenticationFailed: return "The encrypted vault item failed authentication and was not opened."
             case .keyUnavailable: return "The vault master key is unavailable. Restore it with your recovery code."
             case .keychain: return "The vault key could not be stored securely in Keychain."
+            case .randomGeneration: return "The system could not generate secure random bytes for the vault. No key was created."
             }
         }
     }
