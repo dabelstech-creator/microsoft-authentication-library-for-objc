@@ -56,7 +56,8 @@ In repository Settings → Environments, create an environment named
 - Secret `RAILWAY_STAGING_SERVICE_ID`
 - Secret `RAILWAY_STAGING_HEALTHCHECK_URL` (the exact HTTPS URL ending in
   `/health`)
-- Variable `RAILWAY_PROJECT_ID`
+The existing Railway project ID is already bound in the workflow; only the
+staging environment and service identifiers need to be supplied.
 
 The service and environment IDs must identify the staging service/environment,
 not production. Add required reviewers to the GitHub environment if you want
