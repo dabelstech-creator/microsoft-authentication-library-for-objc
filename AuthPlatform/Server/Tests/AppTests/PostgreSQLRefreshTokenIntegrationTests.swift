@@ -102,15 +102,16 @@ final class PostgreSQLRefreshTokenIntegrationTests: XCTestCase {
             XCTAssertEqual(response.status, .noContent)
         })
 
-        let revokedSession = try XCTUnwrap(try await AuthSession.find(sessionID, on: app.db))
-        let revokedRecord = try XCTUnwrap(
-            try await RefreshTokenRecord.query(on: app.db)
-                .filter(\\.$tokenHash == tokenDigest(rawRefreshToken))
-                .first()
-        )
+        let sessionAfterLogout = try await AuthSession.find(sessionID, on: app.db)
+        let revokedSession = try XCTUnwrap(sessionAfterLogout)
+        let recordAfterLogout = try await RefreshTokenRecord.query(on: app.db)
+            .filter(\\.$tokenHash == tokenDigest(rawRefreshToken))
+            .first()
+        let revokedRecord = try XCTUnwrap(recordAfterLogout)
         XCTAssertNotNil(revokedSession.revokedAt)
         XCTAssertNotNil(revokedRecord.revokedAt)
-        XCTAssertEqual(try await refresh(app, token: rawRefreshToken), .unauthorized)
+        let refreshStatus = try await refresh(app, token: rawRefreshToken)
+        XCTAssertEqual(refreshStatus, .unauthorized)
     }
 
     private func refresh(_ app: Application, token: String) async throws -> HTTPStatus {
