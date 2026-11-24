@@ -37,7 +37,7 @@ final class EncryptedVaultAPITests: XCTestCase {
         }
 
         let app = try await Application.make(.testing)
-        defer { app.shutdown() }
+        addTeardownBlock { try await app.asyncShutdown() }
         try await configure(app)
         try await app.autoMigrate()
 
@@ -52,7 +52,7 @@ final class EncryptedVaultAPITests: XCTestCase {
         }
 
         let app = try await Application.make(.testing)
-        defer { app.shutdown() }
+        addTeardownBlock { try await app.asyncShutdown() }
         try await configure(app)
         try await app.autoMigrate()
 
@@ -203,7 +203,7 @@ final class EncryptedVaultAPITests: XCTestCase {
         }
 
         let app = try await Application.make(.testing)
-        defer { app.shutdown() }
+        addTeardownBlock { try await app.asyncShutdown() }
         try await configure(app)
         try await app.autoMigrate()
 
