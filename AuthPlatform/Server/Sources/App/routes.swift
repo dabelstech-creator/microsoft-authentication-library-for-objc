@@ -989,9 +989,43 @@ func routes(_ app: Application) throws {
         return .noContent
     }
 
+    // Backward-compatible v1 reads remain available. Versioned writes and
+    // paginated synchronization are exposed under v2 so older clients never
+    // misinterpret the new page response or silently bypass item concurrency.
+    app.get("v1", "vault", "items") { request async throws -> [EncryptedVaultItemResponse] in
+        let user = try await authenticatedUser(for: request)
+        guard let userID = user.id else { throw Abort(.internalServerError) }
+        let items = try await EncryptedVaultItem.query(on: request.db)
+            .filter(\.$userID == userID)
+            .sort(\.$createdAt, .ascending)
+            .sort(\.$id, .ascending)
+            .all()
+        return items.map(EncryptedVaultItemResponse.init)
+    }
+
+    app.get("v1", "vault", "items", ":clientItemID") { request async throws -> EncryptedVaultItemResponse in
+        let user = try await authenticatedUser(for: request)
+        guard let userID = user.id,
+              let clientItemID = request.parameters.get("clientItemID", as: UUID.self),
+              let item = try await EncryptedVaultItem.query(on: request.db)
+                .filter(\.$userID == userID)
+                .filter(\.$clientItemID == clientItemID)
+                .first()
+        else { throw Abort(.notFound, reason: "Vault item was not found.") }
+        return EncryptedVaultItemResponse(item)
+    }
+
+    app.post("v1", "vault", "items") { _ async throws -> HTTPStatus in
+        throw Abort(.upgradeRequired, reason: "Vault writes require the versioned v2 API. Update the AuthPlatform client.")
+    }
+
+    app.delete("v1", "vault", "items", ":clientItemID") { _ async throws -> HTTPStatus in
+        throw Abort(.upgradeRequired, reason: "Vault deletion requires the versioned v2 API. Update the AuthPlatform client.")
+    }
+
     // Versioned, paginated encrypted vault synchronization. The server stores
     // opaque client-encrypted AES-GCM envelopes and never receives a decryption key.
-    app.get("v1", "vault", "items") { request async throws -> EncryptedVaultItemPage in
+    app.get("v2", "vault", "items") { request async throws -> EncryptedVaultItemPage in
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id else { throw Abort(.internalServerError) }
 
@@ -1032,7 +1066,7 @@ func routes(_ app: Application) throws {
         )
     }
 
-    app.post("v1", "vault", "items") { request async throws -> Response in
+    app.post("v2", "vault", "items") { request async throws -> Response in
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id else { throw Abort(.internalServerError) }
         let input = try request.content.decode(EncryptedVaultItemWriteRequest.self)
@@ -1103,7 +1137,7 @@ func routes(_ app: Application) throws {
         return response
     }
 
-    app.get("v1", "vault", "items", ":clientItemID") { request async throws -> EncryptedVaultItemResponse in
+    app.get("v2", "vault", "items", ":clientItemID") { request async throws -> EncryptedVaultItemResponse in
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id,
               let clientItemID = request.parameters.get("clientItemID", as: UUID.self),
@@ -1117,7 +1151,7 @@ func routes(_ app: Application) throws {
         return EncryptedVaultItemResponse(item)
     }
 
-    app.delete("v1", "vault", "items", ":clientItemID") { request async throws -> HTTPStatus in
+    app.delete("v2", "vault", "items", ":clientItemID") { request async throws -> HTTPStatus in
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id,
               let clientItemID = request.parameters.get("clientItemID", as: UUID.self),
