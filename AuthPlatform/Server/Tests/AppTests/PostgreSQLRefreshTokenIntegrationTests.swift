@@ -21,7 +21,7 @@ final class PostgreSQLRefreshTokenIntegrationTests: XCTestCase {
         try await app.autoMigrate()
 
         let user = User()
-        user.emailNormalized = "refresh-concurrency@example.test"
+        user.emailNormalized = "refresh-\\(UUID().uuidString.lowercased())@example.test"
         user.emailVerifiedAt = Date()
         user.passwordHash = "unused-by-refresh-route"
         try await user.save(on: app.db)
