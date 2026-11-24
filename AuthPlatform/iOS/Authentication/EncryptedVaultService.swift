@@ -69,6 +69,15 @@ enum EncryptedVaultService {
         return changed
     }
 
+    /// Commit the server tombstone before removing the local copy. If the network
+    /// request fails, the local credential remains available rather than being lost
+    /// while another device can still restore the remote copy.
+    static func delete(_ credential: StoredPasswordCredential, api: AuthPlatformAPI, accessToken: String) async throws {
+        let id = stableItemID(for: credential)
+        try await api.deleteVaultItem(clientItemID: id, accessToken: accessToken)
+        try SharedCredentialVault.delete(service: credential.service, username: credential.username)
+    }
+
     private static func findLocalCredential(for itemID: UUID) throws -> StoredPasswordCredential? {
         try SharedCredentialVault.allCredentials().first {
             stableItemID(for: $0) == itemID
