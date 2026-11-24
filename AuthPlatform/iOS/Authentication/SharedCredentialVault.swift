@@ -1,4 +1,4 @@
-import AuthenticationServices
+@preconcurrency import AuthenticationServices
 import Foundation
 import Security
 
@@ -154,7 +154,7 @@ public enum SharedCredentialVault {
 
     /// Rebuild the system's local identity index from the unlocked local vault.
     /// The index contains usernames/domains only; passwords remain encrypted in Keychain.
-    public static func refreshSystemCredentialIdentities(completion: @escaping (Result<Void, Error>) -> Void) {
+    public static func refreshSystemCredentialIdentities(completion: @escaping @Sendable (Result<Void, Error>) -> Void) {
         do {
             let items = try allCredentialIdentities()
             let identities = items.map { item in
@@ -170,7 +170,7 @@ public enum SharedCredentialVault {
                     completion(.success(()))
                     return
                 }
-                store.saveCredentialIdentities(identities) { success, error in
+                store.replaceCredentialIdentities(identities) { success, error in
                     if let error { completion(.failure(error)) }
                     else if success { completion(.success(())) }
                     else { completion(.failure(VaultError.identityStoreUpdateFailed)) }
@@ -205,11 +205,7 @@ public enum SharedCredentialVault {
         let status = SecItemCopyMatching(attributes as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
         guard status == errSecSuccess, let values = result as? [Data] else { throw VaultError.keychain(status) }
-        let envelopes = try values.map { try JSONDecoder().decode(EncryptedVaultItemEnvelope.self, from: $0) }
-        guard let service else { return envelopes }
-        return try envelopes.filter {
-            try VaultCryptography.open($0, as: StoredPasswordCredential.self).service == service
-        }
+        return try values.map { try JSONDecoder().decode(EncryptedVaultItemEnvelope.self, from: $0) }
     }
 
     private static func store(_ envelope: EncryptedVaultItemEnvelope, account: String, username: String) throws {
