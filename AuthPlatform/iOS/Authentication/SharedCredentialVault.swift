@@ -83,7 +83,7 @@ public enum SharedCredentialVault {
 
     /// Encrypted local records used by the sync coordinator. No plaintext is returned.
     static func encryptedItems() throws -> [EncryptedVaultItemEnvelope] {
-        try readEnvelopes(service: nil)
+        try readEnvelopes()
     }
 
     /// Import only after authenticating and decrypting the envelope locally.
@@ -127,7 +127,6 @@ public enum SharedCredentialVault {
             kSecReturnAttributes as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
         ]
-        if let service { attributes[kSecAttrService as String] = service }
         if let accessGroup { attributes[kSecAttrAccessGroup as String] = accessGroup }
         var result: CFTypeRef?
         let status = SecItemCopyMatching(attributes as CFDictionary, &result)
@@ -182,13 +181,6 @@ public enum SharedCredentialVault {
         }
     }
 
-    private static func encryptedItems(for service: String) throws -> [EncryptedVaultItemEnvelope] {
-        try readEnvelopes(service: nil).filter { envelope in
-            let credential = try VaultCryptography.open(envelope, as: StoredPasswordCredential.self)
-            return credential.service == service
-        }
-    }
-
     private static func readEnvelope(account: String) throws -> EncryptedVaultItemEnvelope? {
         var attributes = query(account: account)
         attributes[kSecReturnData as String] = true
@@ -200,7 +192,7 @@ public enum SharedCredentialVault {
         return try JSONDecoder().decode(EncryptedVaultItemEnvelope.self, from: data)
     }
 
-    private static func readEnvelopes(service: String?) throws -> [EncryptedVaultItemEnvelope] {
+    private static func readEnvelopes() throws -> [EncryptedVaultItemEnvelope] {
         var attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: keychainService,
@@ -281,22 +273,6 @@ public enum SharedCredentialVault {
         if status == errSecItemNotFound { return nil }
         guard status == errSecSuccess, let data = result as? Data else { throw VaultError.keychain(status) }
         return try JSONDecoder().decode(StoredPasswordCredential.self, from: data)
-    }
-
-    private static func readLegacyCredentials(for service: String) throws -> [StoredPasswordCredential] {
-        var attributes: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrSynchronizable as String: false,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitAll
-        ]
-        if let accessGroup { attributes[kSecAttrAccessGroup as String] = accessGroup }
-        var result: CFTypeRef?
-        let status = SecItemCopyMatching(attributes as CFDictionary, &result)
-        if status == errSecItemNotFound { return [] }
-        guard status == errSecSuccess, let values = result as? [Data] else { throw VaultError.keychain(status) }
-        return try values.compactMap { try? JSONDecoder().decode(StoredPasswordCredential.self, from: $0) }
     }
 
     private static func deleteLegacyCredential(service: String, username: String) throws {
