@@ -15,6 +15,9 @@ settings:
     SWIFT_VERSION: "6.2"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     TARGETED_DEVICE_FAMILY: "1,2"
+    AUTH_API_BASE_URL: "https://auth.moredesa.com"
+    AUTH_CREDENTIAL_SERVICE: "auth.moredesa.com"
+    AUTH_WEBAUTHN_RP_ID: "auth.moredesa.com"
 
 targets:
   AuthPlatform:
