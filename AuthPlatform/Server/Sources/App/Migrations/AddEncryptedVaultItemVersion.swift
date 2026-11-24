@@ -1,5 +1,6 @@
 import Fluent
 import SQLKit
+import Vapor
 
 /// Adds optimistic concurrency metadata without rewriting the original table-creation migration.
 struct AddEncryptedVaultItemVersion: AsyncMigration {
