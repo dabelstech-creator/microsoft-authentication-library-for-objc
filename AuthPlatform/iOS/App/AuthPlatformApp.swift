@@ -1,5 +1,7 @@
+import AuthenticationServices
 import LocalAuthentication
 import SwiftUI
+import UIKit
 
 @main
 struct AuthPlatformApp: App {
@@ -47,6 +49,10 @@ private struct AuthenticationDemoView: View {
                         if isBusy { ProgressView() } else { Text("Sign in securely") }
                     }
                     .disabled(isBusy || username.isEmpty || password.isEmpty)
+                    Button("Sign in with passkey") {
+                        Task { await signInWithPasskey() }
+                    }
+                    .disabled(isBusy || username.isEmpty)
                 }
 
                 Section("WorkOS AuthKit") {
@@ -63,6 +69,15 @@ private struct AuthenticationDemoView: View {
                 }
 
                 if signedIn {
+                    Section("Passkeys") {
+                        Button("Register this iPhone as a passkey") {
+                            Task { await registerPasskey() }
+                        }
+                        .disabled(isBusy || currentAccessToken.isEmpty)
+                        Text("Passkeys are registered and verified by the AuthPlatform WebAuthn server. Face ID or device passcode is required by the platform authenticator.")
+                            .font(.footnote)
+                    }
+
                     Section("Encrypted password vault") {
                         Text("Credentials are encrypted on this device before they are stored in the shared Keychain or sent to the server.")
                             .font(.footnote)
@@ -181,6 +196,129 @@ private struct AuthenticationDemoView: View {
         .task {
             await restoreSession()
         }
+    }
+
+    private func signInWithPasskey() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let api = try AuthPlatformAPI()
+            let options = try await api.passkeyAuthenticationOptions(email: username)
+            let challenge = try decodePasskeyBase64URL(options.publicKey.challenge)
+            let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(
+                relyingPartyIdentifier: options.publicKey.rpId
+            )
+            let request = provider.createCredentialAssertionRequest(challenge: challenge)
+            request.allowedCredentials = try options.publicKey.allowCredentials.map { descriptor in
+                ASAuthorizationPlatformPublicKeyCredentialDescriptor(
+                    credentialID: try decodePasskeyBase64URL(descriptor.id)
+                )
+            }
+            request.userVerificationPreference = .required
+
+            let authorization = try await PasskeyService(presentationAnchor: currentPresentationAnchor())
+                .authorize([request])
+            guard let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialAssertion else {
+                throw PasskeyFlowError.unexpectedCredential
+            }
+
+            let credentialID = credential.credentialID.base64URLEncodedString()
+            let userHandle = credential.userID.isEmpty ? nil : credential.userID.base64URLEncodedString()
+            let payload = PasskeyAuthenticationCredentialPayload(
+                id: credentialID,
+                rawId: credentialID,
+                response: PasskeyAssertionResponsePayload(
+                    clientDataJSON: credential.rawClientDataJSON.base64URLEncodedString(),
+                    authenticatorData: credential.rawAuthenticatorData.base64URLEncodedString(),
+                    signature: credential.signature.base64URLEncodedString(),
+                    userHandle: userHandle
+                )
+            )
+            let tokens = try await api.finishPasskeyAuthentication(
+                challengeID: options.challengeID,
+                credential: payload
+            )
+            guard tokens.emailVerified else {
+                status = "The passkey account is not verified. Contact support."
+                return
+            }
+            try AuthSessionVault.save(refreshToken: tokens.refreshToken)
+            currentAccessToken = tokens.accessToken
+            signedIn = true
+            workosSignedIn = false
+            status = "Passkey authentication succeeded and the server issued a new session."
+            await synchronizeAfterAuthentication()
+        } catch {
+            status = "Passkey sign-in failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func registerPasskey() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let api = try AuthPlatformAPI()
+            let options = try await api.passkeyRegistrationOptions(accessToken: currentAccessToken)
+            let challenge = try decodePasskeyBase64URL(options.publicKey.challenge)
+            let userID = try decodePasskeyBase64URL(options.publicKey.user.id)
+            let provider = ASAuthorizationPlatformPublicKeyCredentialProvider(
+                relyingPartyIdentifier: options.publicKey.rp.id
+            )
+            let request = provider.createCredentialRegistrationRequest(
+                challenge: challenge,
+                name: options.publicKey.user.name,
+                userID: userID
+            )
+            request.displayName = options.publicKey.user.displayName
+            request.userVerificationPreference = .required
+
+            let authorization = try await PasskeyService(presentationAnchor: currentPresentationAnchor())
+                .authorize([request])
+            guard let credential = authorization.credential as? ASAuthorizationPlatformPublicKeyCredentialRegistration,
+                  let attestationObject = credential.rawAttestationObject else {
+                throw PasskeyFlowError.missingAttestation
+            }
+
+            let credentialID = credential.credentialID.base64URLEncodedString()
+            let payload = PasskeyRegistrationCredentialPayload(
+                id: credentialID,
+                rawId: credentialID,
+                response: PasskeyAttestationResponsePayload(
+                    clientDataJSON: credential.rawClientDataJSON.base64URLEncodedString(),
+                    attestationObject: attestationObject.base64URLEncodedString()
+                )
+            )
+            try await api.finishPasskeyRegistration(
+                challengeID: options.challengeID,
+                credential: payload,
+                accessToken: currentAccessToken
+            )
+            status = "This iPhone's passkey was verified and registered with AuthPlatform."
+        } catch {
+            status = "Passkey registration failed: \(error.localizedDescription)"
+        }
+    }
+
+    private func currentPresentationAnchor() throws -> ASPresentationAnchor {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        guard let window = scenes.flatMap(\.windows).first(where: \.isKeyWindow) else {
+            throw PasskeyFlowError.noPresentationWindow
+        }
+        return window
+    }
+
+    private func decodePasskeyBase64URL(_ value: String) throws -> Data {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder != 0 {
+            base64 += String(repeating: "=", count: 4 - remainder)
+        }
+        guard let data = Data(base64Encoded: base64), !data.isEmpty else {
+            throw PasskeyFlowError.invalidServerChallenge
+        }
+        return data
     }
 
     private func createAccount() async {
@@ -512,4 +650,21 @@ private struct AuthenticationDemoView: View {
             status = "Sign-out could not confirm server revocation: \(error.localizedDescription). Your local session remains available so you can retry."
         }
     }
+private enum PasskeyFlowError: LocalizedError {
+    case noPresentationWindow
+    case invalidServerChallenge
+    case unexpectedCredential
+    case missingAttestation
+
+    var errorDescription: String? {
+        switch self {
+        case .noPresentationWindow: return "The passkey interface could not find an active app window."
+        case .invalidServerChallenge: return "The server returned an invalid WebAuthn challenge or credential identifier."
+        case .unexpectedCredential: return "Apple returned an unexpected passkey credential type."
+        case .missingAttestation: return "Apple did not return an attestation object for passkey registration."
+        }
+    }
+}
+
+
 }
