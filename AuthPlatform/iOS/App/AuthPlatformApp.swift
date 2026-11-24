@@ -1,5 +1,6 @@
 import LocalAuthentication
 import SwiftUI
+import UniformTypeIdentifiers
 
 @main
 struct AuthPlatformApp: App {
@@ -12,6 +13,13 @@ struct AuthPlatformApp: App {
 
 @MainActor
 private struct AuthenticationDemoView: View {
+    private enum JSONEncoder {
+        static var prettyPrinted: Foundation.JSONEncoder {
+            let encoder = Foundation.JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+            return encoder
+        }
+    }
     @State private var username = ""
     @State private var password = ""
     @State private var newPassword = ""
@@ -21,6 +29,11 @@ private struct AuthenticationDemoView: View {
     @State private var workosSignedIn = false
     @State private var status = "Sign in to your AuthPlatform account."
     @State private var isBusy = false
+    @State private var recoveryCode = ""
+    @State private var recoveryPackageJSON = ""
+    @State private var recoveryCodeInput = ""
+    @State private var showRecoveryImporter = false
+    @State private var recoveryAcknowledged = false
 
     private var service: String {
         Bundle.main.object(forInfoDictionaryKey: "AUTH_CREDENTIAL_SERVICE") as? String ?? "auth.example.com"
@@ -78,6 +91,54 @@ private struct AuthenticationDemoView: View {
                     }
                 }
 
+                if signedIn {
+                    Section("Encrypted cloud vault") {
+                        if VaultCryptography.hasVaultKey() {
+                            Label("Vault encryption key is available in this iPhone's Keychain", systemImage: "lock.shield")
+                                .font(.footnote)
+                            Button("Synchronize encrypted vault") {
+                                Task { await synchronizeEncryptedVault() }
+                            }
+                            .disabled(isBusy || currentAccessToken.isEmpty)
+                        } else {
+                            Text("Create a vault key before enabling encrypted cloud synchronization. The server will receive ciphertext only.")
+                                .font(.footnote)
+                            Button("Create encrypted vault and recovery code") {
+                                createEncryptedVault()
+                            }
+                            .disabled(isBusy)
+                        }
+
+                        if !recoveryCode.isEmpty {
+                            Text("Save this recovery code offline. It is shown only during this setup session.")
+                                .font(.footnote)
+                                .foregroundStyle(.orange)
+                            Text(recoveryCode)
+                                .font(.system(.footnote, design: .monospaced))
+                                .textSelection(.enabled)
+                            if !recoveryPackageJSON.isEmpty {
+                                ShareLink(item: recoveryPackageJSON,
+                                          preview: SharePreview("AuthPlatform vault recovery package")) {
+                                    Label("Export recovery package", systemImage: "square.and.arrow.up")
+                                }
+                            }
+                            Toggle("I saved the recovery code and exported the recovery package", isOn: $recoveryAcknowledged)
+                        }
+                    }
+
+                    Section("Restore vault on this iPhone") {
+                        SecureField("Recovery code", text: $recoveryCodeInput)
+                            .textInputAutocapitalization(.never)
+                            .autocorrectionDisabled()
+                        Button("Choose recovery package") {
+                            showRecoveryImporter = true
+                        }
+                        .disabled(isBusy || recoveryCodeInput.isEmpty || VaultCryptography.hasVaultKey())
+                        Text("Restore is available only when this device does not already contain a vault key. Existing keys are never overwritten.")
+                            .font(.footnote)
+                    }
+                }
+
                 Section("Unlock saved sign-in") {
                     Button("Unlock with Face ID / device passcode") {
                         Task { await unlockCredential() }
@@ -100,6 +161,60 @@ private struct AuthenticationDemoView: View {
                 }
             }
             .navigationTitle("AuthPlatform")
+            .fileImporter(isPresented: $showRecoveryImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
+                restoreEncryptedVault(from: result)
+            }
+        }
+    }
+
+    private func createEncryptedVault() {
+        do {
+            let created = try VaultCryptography.createVaultKey()
+            recoveryCode = created.recoveryCode
+            recoveryPackageJSON = String(data: try JSONEncoder.prettyPrinted.encode(created.recoveryPackage), encoding: .utf8) ?? ""
+            recoveryAcknowledged = false
+            status = "Vault key created. Export the recovery package and store the recovery code offline before synchronizing."
+        } catch {
+            status = "Could not create the encrypted vault: \\(error.localizedDescription)"
+        }
+    }
+
+    private func restoreEncryptedVault(from result: Result<[URL], Error>) {
+        do {
+            let urls = try result.get()
+            guard let url = urls.first else { return }
+            let hasAccess = url.startAccessingSecurityScopedResource()
+            defer { if hasAccess { url.stopAccessingSecurityScopedResource() } }
+            let data = try Data(contentsOf: url)
+            let package = try JSONDecoder().decode(VaultCryptography.RecoveryPackage.self, from: data)
+            try VaultCryptography.restoreVaultKey(recoveryCode: recoveryCodeInput, package: package)
+            recoveryCodeInput = ""
+            status = "Vault key restored securely. Sign in, then synchronize to retrieve encrypted vault items."
+        } catch {
+            status = "Vault recovery failed: \\(error.localizedDescription)"
+        }
+    }
+
+    private func synchronizeEncryptedVault() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            guard let refreshToken = try AuthSessionVault.refreshToken() else {
+                status = "Your session has expired. Sign in again before synchronizing."
+                return
+            }
+            let api = try AuthPlatformAPI()
+            let refreshed = try await api.refresh(refreshToken: refreshToken)
+            guard refreshed.emailVerified else {
+                status = "Verify your account before synchronizing the vault."
+                return
+            }
+            try AuthSessionVault.save(refreshToken: refreshed.refreshToken)
+            currentAccessToken = refreshed.accessToken
+            let changed = try await EncryptedVaultService.synchronize(api: api, accessToken: refreshed.accessToken)
+            status = "Encrypted vault synchronized. \\(changed) remote credential changes applied. The server received encrypted envelopes only."
+        } catch {
+            status = "Encrypted vault synchronization failed: \\(error.localizedDescription)"
         }
     }
 
