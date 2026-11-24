@@ -57,6 +57,27 @@ final class VaultCryptographyTests: XCTestCase {
         XCTAssertFalse(VaultCryptography.hasVaultKey())
     }
 
+    func testSharedCredentialVaultStoresAndRetrievesEncryptedRecords() throws {
+        _ = try VaultCryptography.createVaultKey()
+        let service = "test-\\(UUID().uuidString.lowercased()).example"
+        let credential = StoredPasswordCredential(
+            service: service,
+            username: "autofill-user@example.test",
+            password: "never-store-this-as-plaintext"
+        )
+        defer { try? SharedCredentialVault.delete(service: service, username: credential.username) }
+
+        let envelope = try SharedCredentialVault.saveEncrypted(credential)
+        XCTAssertFalse(envelope.ciphertext.contains(credential.password))
+        XCTAssertEqual(
+            try SharedCredentialVault.credential(service: service, username: credential.username),
+            credential
+        )
+        XCTAssertTrue(try SharedCredentialVault.credentialIdentities(for: service).contains {
+            $0.username == credential.username && $0.service == service
+        })
+    }
+
     func testTamperedAuthenticationTagIsRejected() throws {
         _ = try VaultCryptography.createVaultKey()
         let credential = StoredPasswordCredential(
