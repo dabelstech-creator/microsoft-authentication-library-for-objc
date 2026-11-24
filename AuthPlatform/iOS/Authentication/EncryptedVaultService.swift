@@ -1,5 +1,6 @@
 import CryptoKit
 import Foundation
+import Security
 
 /// Bridges the device-only Keychain credential store to the server's opaque
 /// AES-GCM envelope API. Plaintext is never passed to AuthPlatformAPI.
@@ -18,7 +19,7 @@ enum EncryptedVaultService {
             hex.dropFirst(12).prefix(4),
             hex.dropFirst(16).prefix(4),
             hex.dropFirst(20).prefix(12)
-        ].map(String.init).joined(separator: "-")
+        ].map { String($0) }.joined(separator: "-")
         return UUID(uuidString: formatted)!
     }
 
