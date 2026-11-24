@@ -19,6 +19,30 @@ Use the Free plan in Oregon, matching the database. No database credentials or t
 
 The staging folder was created at the Dropbox account root (`/AuthPlatform Backups`). Configure the Dropbox app for Full Dropbox access, but grant only `files.content.write` and `files.metadata.read` OAuth scopes. Do not grant sharing scopes. Generate a short-lived token for the one-time run and revoke it after upload.
 
+## GitHub Actions manual trigger
+
+The repository workflow is `.github/workflows/authplatform-one-time-encrypted-backup.yml`.
+It is deliberately manual-only (`workflow_dispatch`) and requires the operator to select
+`confirm_backup=yes`. It checks that `GET /status` is idle, sends exactly one
+authenticated `POST /run`, polls for completion, and validates the returned upload
+metadata without printing credentials.
+
+Before the workflow can run:
+
+1. In the repository, open **Settings → Secrets and variables → Actions**.
+2. Create a repository secret named exactly `BACKUP_TRIGGER_TOKEN`.
+3. Set its value to the same token configured as the Render runner's
+   `BACKUP_TRIGGER_TOKEN`. Enter it directly into GitHub; never commit it or paste it
+   into chat.
+4. Ensure the workflow file is present on the repository's default branch. GitHub's
+   manual workflow dispatch requires that.
+5. Open **Actions → AuthPlatform One-Time Encrypted Backup → Run workflow** and select
+   `yes` only when explicitly ready to start the production export.
+
+The workflow secret is separate from the Render runtime secrets. It contains only the
+trigger bearer token; the database URL, Dropbox token, and encryption passphrase remain
+configured in Render and are not copied into GitHub.
+
 ## One-time execution
 
 1. Configure all secrets above in the Render service Environment page.
