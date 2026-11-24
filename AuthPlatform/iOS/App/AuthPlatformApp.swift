@@ -663,9 +663,10 @@ private struct AuthenticationDemoView: View {
                         conflict.localEnvelope,
                         as: StoredPasswordCredential.self
                     )
-                    try SharedCredentialVault.delete(clientItemID: conflict.localEnvelope.clientItemID)
-                    let replacement = try SharedCredentialVault.saveEncrypted(credential)
+                    let replacement = try VaultCryptography.seal(credential, clientItemID: UUID())
                     _ = try await api.saveVaultItem(replacement, accessToken: currentAccessToken)
+                    try SharedCredentialVault.delete(clientItemID: conflict.localEnvelope.clientItemID)
+                    try SharedCredentialVault.importEncryptedItem(replacement)
                 } else {
                     _ = try await api.saveVaultItem(
                         conflict.localEnvelope,
