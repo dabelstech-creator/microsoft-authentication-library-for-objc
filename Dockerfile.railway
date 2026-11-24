@@ -19,4 +19,4 @@ ENV PORT=8080
 EXPOSE 8080
 
 # Run migrations against the direct PostgreSQL URL before serving requests.
-CMD ["sh", "-c", ": \"\${DATABASE_URL:?DATABASE_URL is required}\"; : \"\${DIRECT_DATABASE_URL:?DIRECT_DATABASE_URL is required}\"; DATABASE_URL=\"$DIRECT_DATABASE_URL\" /app/App migrate --yes && exec /app/App"]
+CMD ["sh", "-c", ": \"${DATABASE_URL:?DATABASE_URL is required}\"; : \"${DIRECT_DATABASE_URL:?DIRECT_DATABASE_URL is required}\"; DATABASE_URL=\"$DIRECT_DATABASE_URL\" /app/App migrate --yes && exec /app/App"]
