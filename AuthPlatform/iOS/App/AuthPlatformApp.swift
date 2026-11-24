@@ -137,12 +137,37 @@ private struct AuthenticationDemoView: View {
                     }
                 }
 
-                Section("Password and verification fields") {
+                Section("Create account and verify email") {
+                    SecureField("New account password", text: $newPassword)
+                        .textContentType(.newPassword)
+                    Button("Create account") {
+                        Task { await createAccount() }
+                    }
+                    .disabled(isBusy || username.isEmpty || newPassword.isEmpty)
+                    Button("Resend verification email") {
+                        Task { await requestEmailVerification() }
+                    }
+                    .disabled(isBusy || username.isEmpty)
+                    SecureField("Verification token from email", text: $verificationCode)
+                        .textInputAutocapitalization(.never)
+                        .autocorrectionDisabled()
+                    Button("Verify email address") {
+                        Task { await verifyEmail() }
+                    }
+                    .disabled(isBusy || verificationCode.isEmpty)
+                }
+
+                Section("Account recovery") {
+                    Button("Send password-reset email") {
+                        Task { await requestPasswordReset() }
+                    }
+                    .disabled(isBusy || username.isEmpty)
                     SecureField("New password", text: $newPassword)
                         .textContentType(.newPassword)
-                    TextField("One-time code", text: $verificationCode)
-                        .textContentType(.oneTimeCode)
-                        .keyboardType(.numberPad)
+                    Button("Reset password using email token") {
+                        Task { await resetPassword() }
+                    }
+                    .disabled(isBusy || verificationCode.isEmpty || newPassword.isEmpty)
                 }
 
                 Section("Status") {
@@ -155,6 +180,66 @@ private struct AuthenticationDemoView: View {
         }
         .task {
             await restoreSession()
+        }
+    }
+
+    private func createAccount() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            let result = try await AuthPlatformAPI().register(email: username, password: newPassword)
+            status = result.emailVerificationRequired
+                ? "Account created. Check your email for the verification link, then paste its token above."
+                : "Account created. You can now sign in."
+        } catch {
+            status = "Account registration failed: \\(error.localizedDescription)"
+        }
+    }
+
+    private func requestEmailVerification() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await AuthPlatformAPI().requestEmailVerification(email: username)
+            status = "If the account exists and needs verification, a verification email has been sent."
+        } catch {
+            status = "Could not request email verification: \\(error.localizedDescription)"
+        }
+    }
+
+    private func verifyEmail() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await AuthPlatformAPI().verifyEmail(token: verificationCode)
+            verificationCode = ""
+            status = "Email verified. Sign in to continue."
+        } catch {
+            status = "Email verification failed: \\(error.localizedDescription)"
+        }
+    }
+
+    private func requestPasswordReset() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await AuthPlatformAPI().requestPasswordReset(email: username)
+            status = "If the account exists, password-reset instructions have been sent."
+        } catch {
+            status = "Could not request password recovery: \\(error.localizedDescription)"
+        }
+    }
+
+    private func resetPassword() async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            try await AuthPlatformAPI().resetPassword(token: verificationCode, newPassword: newPassword)
+            verificationCode = ""
+            newPassword = ""
+            status = "Password reset successfully. Sign in with the new password."
+        } catch {
+            status = "Password reset failed: \\(error.localizedDescription)"
         }
     }
 
