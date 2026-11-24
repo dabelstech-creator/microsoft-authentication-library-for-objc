@@ -14,6 +14,17 @@ public struct StoredPasswordCredential: Codable, Equatable, Sendable {
     }
 }
 
+public struct StoredCredentialIdentity: Identifiable, Hashable, Sendable {
+    public var id: String { service + "|" + username.lowercased() }
+    public let service: String
+    public let username: String
+
+    public init(service: String, username: String) {
+        self.service = service
+        self.username = username
+    }
+}
+
 /// Shared encrypted Keychain storage used by the host app and Credential Provider Extension.
 /// The item metadata (domain and username) is searchable; credential secrets are AES-GCM ciphertext.
 public enum SharedCredentialVault {
@@ -38,7 +49,7 @@ public enum SharedCredentialVault {
         let existing = try readEnvelope(account: account)
         let itemID = existing?.clientItemID ?? UUID()
         let envelope = try VaultCryptography.seal(credential, clientItemID: itemID)
-        try store(envelope, account: account)
+        try store(envelope, account: account, username: credential.username)
         return envelope
     }
 
@@ -93,7 +104,68 @@ public enum SharedCredentialVault {
     /// Import only after authenticating and decrypting the envelope locally.
     static func importEncryptedItem(_ envelope: EncryptedVaultItemEnvelope) throws {
         let credential = try VaultCryptography.open(envelope, as: StoredPasswordCredential.self)
-        try store(envelope, account: accountKey(service: credential.service, username: credential.username))
+        try store(envelope, account: accountKey(service: credential.service, username: credential.username), username: credential.username)
+    }
+
+    /// Returns searchable identity metadata only. Password ciphertext is not decrypted
+    /// until after the user completes device-owner authentication in the extension.
+    public static func credentialIdentities(for service: String) throws -> [StoredCredentialIdentity] {
+        let normalized = service.lowercased()
+        let encrypted = try readIdentityAttributes(service: keychainService)
+            .compactMap { identity(from: $0, expectedService: normalized, legacy: false) }
+        let legacy = try readIdentityAttributes(service: normalized)
+            .compactMap { identity(from: $0, expectedService: normalized, legacy: true) }
+        return Array(Set(encrypted + legacy)).sorted {
+            ($0.username.localizedCaseInsensitiveCompare($1.username) == .orderedAscending)
+        }
+    }
+
+    private static func allCredentialIdentities() throws -> [StoredCredentialIdentity] {
+        let encrypted = try readIdentityAttributes(service: keychainService)
+            .compactMap { identity(from: $0, expectedService: nil, legacy: false) }
+        let legacyAttributes = try readIdentityAttributes(service: nil)
+        let legacy = legacyAttributes.compactMap { attributes -> StoredCredentialIdentity? in
+            guard let service = attributes[kSecAttrService as String] as? String,
+                  service != keychainService,
+                  service.contains(".") else { return nil }
+            return identity(from: attributes, expectedService: service.lowercased(), legacy: true)
+        }
+        return Array(Set(encrypted + legacy)).sorted {
+            ($0.service + $0.username).localizedCaseInsensitiveCompare($1.service + $1.username) == .orderedAscending
+        }
+    }
+
+    private static func readIdentityAttributes(service: String?) throws -> [[String: Any]] {
+        var attributes: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrSynchronizable as String: false,
+            kSecReturnAttributes as String: true,
+            kSecMatchLimit as String: kSecMatchLimitAll
+        ]
+        if let service { attributes[kSecAttrService as String] = service }
+        if let accessGroup { attributes[kSecAttrAccessGroup as String] = accessGroup }
+        var result: CFTypeRef?
+        let status = SecItemCopyMatching(attributes as CFDictionary, &result)
+        if status == errSecItemNotFound { return [] }
+        guard status == errSecSuccess, let values = result as? [[String: Any]] else {
+            throw VaultError.keychain(status)
+        }
+        return values
+    }
+
+    private static func identity(
+        from attributes: [String: Any],
+        expectedService: String?,
+        legacy: Bool
+    ) -> StoredCredentialIdentity? {
+        guard let service = attributes[kSecAttrService as String] as? String,
+              let account = attributes[kSecAttrAccount as String] as? String else { return nil }
+        let components = account.split(separator: "|", maxSplits: 1).map(String.init)
+        guard components.count == 2 else { return nil }
+        let domain = legacy ? service.lowercased() : components[0].lowercased()
+        guard expectedService == nil || expectedService == domain else { return nil }
+        let username = (attributes[kSecAttrLabel as String] as? String) ?? components[1]
+        return StoredCredentialIdentity(service: domain, username: username)
     }
 
     public static func allCredentials() throws -> [StoredPasswordCredential] {
@@ -106,7 +178,7 @@ public enum SharedCredentialVault {
     /// The index contains usernames/domains only; passwords remain encrypted in Keychain.
     public static func refreshSystemCredentialIdentities(completion: @escaping (Result<Void, Error>) -> Void) {
         do {
-            let items = try allCredentials()
+            let items = try allCredentialIdentities()
             let identities = items.map { item in
                 ASPasswordCredentialIdentity(
                     serviceIdentifier: ASCredentialServiceIdentifier(identifier: item.service, type: .domain),
@@ -169,14 +241,18 @@ public enum SharedCredentialVault {
         }
     }
 
-    private static func store(_ envelope: EncryptedVaultItemEnvelope, account: String) throws {
+    private static func store(_ envelope: EncryptedVaultItemEnvelope, account: String, username: String) throws {
         let data = try JSONEncoder().encode(envelope)
         let base = query(account: account)
-        let updateAttributes: [String: Any] = [kSecValueData as String: data]
+        let updateAttributes: [String: Any] = [
+            kSecValueData as String: data,
+            kSecAttrLabel as String: username
+        ]
         let status = SecItemUpdate(base as CFDictionary, updateAttributes as CFDictionary)
         if status == errSecItemNotFound {
             var insert = base
             insert[kSecValueData as String] = data
+            insert[kSecAttrLabel as String] = username
             insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             let addStatus = SecItemAdd(insert as CFDictionary, nil)
             if addStatus == errSecDuplicateItem {
