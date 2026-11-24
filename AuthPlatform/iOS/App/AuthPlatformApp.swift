@@ -17,6 +17,7 @@ private struct VaultSyncConflict: Identifiable {
     let localEnvelope: EncryptedVaultItemEnvelope
     let remoteEnvelope: EncryptedVaultItemEnvelope
     let remoteVersion: Int
+    let isRemoteDeleted: Bool
     let service: String
     let username: String
 }
@@ -125,7 +126,9 @@ private struct AuthenticationDemoView: View {
                                     Text(conflict.service)
                                         .font(.caption)
                                         .foregroundStyle(.secondary)
-                                    Text("Cloud version \(conflict.remoteVersion). Choose which encrypted copy to keep.")
+                                    Text(conflict.isRemoteDeleted
+                                        ? "The cloud copy was deleted. Keep your local copy as a new item or accept the deletion."
+                                        : "Cloud version \(conflict.remoteVersion). Choose which encrypted copy to keep.")
                                         .font(.footnote)
                                     HStack {
                                         Button("Keep this iPhone") {
@@ -586,10 +589,6 @@ private struct AuthenticationDemoView: View {
             var conflicts: [VaultSyncConflict] = []
 
             for record in remote {
-                if record.isDeleted {
-                    try SharedCredentialVault.delete(clientItemID: record.clientItemID)
-                    continue
-                }
                 let envelope = EncryptedVaultItemEnvelope(
                     clientItemID: record.clientItemID,
                     ciphertext: record.ciphertext,
@@ -597,6 +596,23 @@ private struct AuthenticationDemoView: View {
                     authenticationTag: record.authenticationTag,
                     formatVersion: record.formatVersion
                 )
+                if record.isDeleted {
+                    if let localEnvelope = localByID[record.clientItemID], localEnvelope != envelope {
+                        let localCredential = try VaultCryptography.open(localEnvelope, as: StoredPasswordCredential.self)
+                        conflicts.append(VaultSyncConflict(
+                            localEnvelope: localEnvelope,
+                            remoteEnvelope: envelope,
+                            remoteVersion: record.version,
+                            isRemoteDeleted: true,
+                            service: localCredential.service,
+                            username: localCredential.username
+                        ))
+                    } else {
+                        try SharedCredentialVault.delete(clientItemID: record.clientItemID)
+                    }
+                    continue
+                }
+
                 if let localEnvelope = localByID[record.clientItemID] {
                     if localEnvelope != envelope {
                         let localCredential = try VaultCryptography.open(localEnvelope, as: StoredPasswordCredential.self)
@@ -605,6 +621,7 @@ private struct AuthenticationDemoView: View {
                             localEnvelope: localEnvelope,
                             remoteEnvelope: envelope,
                             remoteVersion: record.version,
+                            isRemoteDeleted: false,
                             service: remoteCredential.service,
                             username: localCredential.username == remoteCredential.username
                                 ? remoteCredential.username
@@ -639,20 +656,36 @@ private struct AuthenticationDemoView: View {
         do {
             if keepLocal {
                 let api = try AuthPlatformAPI()
-                _ = try await api.saveVaultItem(
-                    conflict.localEnvelope,
-                    expectedVersion: conflict.remoteVersion,
-                    accessToken: currentAccessToken
-                )
+                if conflict.isRemoteDeleted {
+                    let credential = try VaultCryptography.open(
+                        conflict.localEnvelope,
+                        as: StoredPasswordCredential.self
+                    )
+                    try SharedCredentialVault.delete(clientItemID: conflict.localEnvelope.clientItemID)
+                    let replacement = try SharedCredentialVault.saveEncrypted(credential)
+                    _ = try await api.saveVaultItem(replacement, accessToken: currentAccessToken)
+                } else {
+                    _ = try await api.saveVaultItem(
+                        conflict.localEnvelope,
+                        expectedVersion: conflict.remoteVersion,
+                        accessToken: currentAccessToken
+                    )
+                }
             } else {
                 try SharedCredentialVault.delete(clientItemID: conflict.localEnvelope.clientItemID)
-                try SharedCredentialVault.importEncryptedItem(conflict.remoteEnvelope)
+                if !conflict.isRemoteDeleted {
+                    try SharedCredentialVault.importEncryptedItem(conflict.remoteEnvelope)
+                }
             }
             syncConflicts.removeAll { $0.id == conflict.id }
             SharedCredentialVault.refreshSystemCredentialIdentities { _ in }
             status = keepLocal
-                ? "The local encrypted copy is now the server's current version."
-                : "The cloud encrypted copy replaced the local copy on this iPhone."
+                ? (conflict.isRemoteDeleted
+                    ? "Your local credential was restored as a new vault item; the deleted ID was not reused."
+                    : "The local encrypted copy is now the server's current version.")
+                : (conflict.isRemoteDeleted
+                    ? "The cloud deletion was accepted and the local credential was removed."
+                    : "The cloud encrypted copy replaced the local copy on this iPhone.")
         } catch {
             status = "Conflict resolution failed safely: \(error.localizedDescription)"
         }
