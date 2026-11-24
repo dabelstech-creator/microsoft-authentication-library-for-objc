@@ -33,6 +33,7 @@ private struct AuthenticationDemoView: View {
     @State private var recoveryPackageJSON = ""
     @State private var recoveryCodeInput = ""
     @State private var showRecoveryImporter = false
+    @State private var showRecoveryExporter = false
     @State private var recoveryAcknowledged = false
 
     private var savedCredentials: [StoredPasswordCredential] {
@@ -146,9 +147,10 @@ private struct AuthenticationDemoView: View {
                                 .font(.system(.footnote, design: .monospaced))
                                 .textSelection(.enabled)
                             if !recoveryPackageJSON.isEmpty {
-                                ShareLink(item: recoveryPackageJSON,
-                                          preview: SharePreview("AuthPlatform vault recovery package")) {
-                                    Label("Export recovery package", systemImage: "square.and.arrow.up")
+                                Button {
+                                    showRecoveryExporter = true
+                                } label: {
+                                    Label("Export recovery package as JSON", systemImage: "square.and.arrow.up")
                                 }
                             }
                             Toggle("I saved the recovery code and exported the recovery package", isOn: $recoveryAcknowledged)
@@ -192,6 +194,19 @@ private struct AuthenticationDemoView: View {
             .navigationTitle("AuthPlatform")
             .fileImporter(isPresented: $showRecoveryImporter, allowedContentTypes: [.json], allowsMultipleSelection: false) { result in
                 restoreEncryptedVault(from: result)
+            }
+            .fileExporter(
+                isPresented: $showRecoveryExporter,
+                document: RecoveryPackageDocument(text: recoveryPackageJSON),
+                contentType: .json,
+                defaultFilename: "AuthPlatform-Vault-Recovery"
+            ) { result in
+                switch result {
+                case .success:
+                    status = "Recovery package exported. Keep it separate from your offline recovery code."
+                case .failure(let error):
+                    status = "Recovery package export failed: \(error.localizedDescription)"
+                }
             }
         }
     }
@@ -348,5 +363,28 @@ private struct AuthenticationDemoView: View {
         } catch {
             status = "Unlock failed: \(error.localizedDescription)"
         }
+    }
+}
+
+
+private struct RecoveryPackageDocument: FileDocument {
+    static var readableContentTypes: [UTType] { [.json] }
+
+    let text: String
+
+    init(text: String) {
+        self.text = text
+    }
+
+    init(configuration: ReadConfiguration) throws {
+        guard let data = configuration.file.regularFileContents,
+              let value = String(data: data, encoding: .utf8) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        text = value
+    }
+
+    func fileWrapper(configuration: WriteConfiguration) throws -> FileWrapper {
+        FileWrapper(regularFileWithContents: Data(text.utf8))
     }
 }
