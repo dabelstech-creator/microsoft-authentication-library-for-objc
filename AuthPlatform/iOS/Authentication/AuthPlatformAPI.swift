@@ -269,7 +269,7 @@ final class AuthPlatformAPI {
     }
 }
 
-private struct RegistrationResponse: Decodable {
+struct RegistrationResponse: Decodable, Sendable {
     let userID: UUID
     let emailVerificationRequired: Bool
 }
