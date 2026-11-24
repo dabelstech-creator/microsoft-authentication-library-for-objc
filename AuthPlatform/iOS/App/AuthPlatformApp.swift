@@ -261,15 +261,15 @@ private struct AuthenticationDemoView: View {
                 throw PasskeyFlowError.unexpectedCredential
             }
 
-            let credentialID = credential.credentialID.base64URLEncodedString()
-            let userHandle = credential.userID?.isEmpty == false ? credential.userID?.base64URLEncodedString() : nil
+            let credentialID = credential.credentialID.webAuthnBase64URLEncodedString()
+            let userHandle = credential.userID?.isEmpty == false ? credential.userID?.webAuthnBase64URLEncodedString() : nil
             let payload = PasskeyAuthenticationCredentialPayload(
                 id: credentialID,
                 rawId: credentialID,
                 response: PasskeyAssertionResponsePayload(
-                    clientDataJSON: credential.rawClientDataJSON.base64URLEncodedString(),
-                    authenticatorData: credential.rawAuthenticatorData.base64URLEncodedString(),
-                    signature: credential.signature.base64URLEncodedString(),
+                    clientDataJSON: credential.rawClientDataJSON.webAuthnBase64URLEncodedString(),
+                    authenticatorData: credential.rawAuthenticatorData.webAuthnBase64URLEncodedString(),
+                    signature: credential.signature.webAuthnBase64URLEncodedString(),
                     userHandle: userHandle
                 )
             )
@@ -318,13 +318,13 @@ private struct AuthenticationDemoView: View {
                 throw PasskeyFlowError.missingAttestation
             }
 
-            let credentialID = credential.credentialID.base64URLEncodedString()
+            let credentialID = credential.credentialID.webAuthnBase64URLEncodedString()
             let payload = PasskeyRegistrationCredentialPayload(
                 id: credentialID,
                 rawId: credentialID,
                 response: PasskeyAttestationResponsePayload(
-                    clientDataJSON: credential.rawClientDataJSON.base64URLEncodedString(),
-                    attestationObject: attestationObject.base64URLEncodedString()
+                    clientDataJSON: credential.rawClientDataJSON.webAuthnBase64URLEncodedString(),
+                    attestationObject: attestationObject.webAuthnBase64URLEncodedString()
                 )
             )
             try await api.finishPasskeyRegistration(
