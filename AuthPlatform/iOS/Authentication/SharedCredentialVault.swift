@@ -77,6 +77,7 @@ public enum SharedCredentialVault {
     public static func allCredentials() throws -> [StoredPasswordCredential] {
         var attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: keychainService,
             kSecAttrSynchronizable as String: false,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
