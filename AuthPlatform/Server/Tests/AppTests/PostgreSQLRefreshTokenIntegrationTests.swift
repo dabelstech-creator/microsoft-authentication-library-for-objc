@@ -105,7 +105,7 @@ final class PostgreSQLRefreshTokenIntegrationTests: XCTestCase {
         let sessionAfterLogout = try await AuthSession.find(sessionID, on: app.db)
         let revokedSession = try XCTUnwrap(sessionAfterLogout)
         let recordAfterLogout = try await RefreshTokenRecord.query(on: app.db)
-            .filter(\\.$tokenHash == tokenDigest(rawRefreshToken))
+            .filter(\.$tokenHash == tokenDigest(rawRefreshToken))
             .first()
         let revokedRecord = try XCTUnwrap(recordAfterLogout)
         XCTAssertNotNil(revokedSession.revokedAt)
