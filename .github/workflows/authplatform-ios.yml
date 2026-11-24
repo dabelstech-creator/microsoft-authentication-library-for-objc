@@ -47,3 +47,12 @@ jobs:
             -configuration Debug \
             CODE_SIGNING_ALLOWED=NO \
             build
+      - name: Run vault cryptography and recovery unit tests
+        run: |
+          xcodebuild \
+            -project AuthPlatform/iOS/AuthPlatform.xcodeproj \
+            -scheme AuthPlatformTests \
+            -destination 'platform=iOS Simulator,name=iPhone 17' \
+            -configuration Debug \
+            CODE_SIGNING_ALLOWED=NO \
+            test
