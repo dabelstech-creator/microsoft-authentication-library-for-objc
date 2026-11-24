@@ -59,3 +59,5 @@ jobs:
       - name: Run AuthPlatform unit and PostgreSQL integration tests
         working-directory: AuthPlatform/Server
         run: swift test
+      - name: Validate Railway root-context Docker image
+        run: docker build --file Dockerfile.railway --tag authplatform:ci .
