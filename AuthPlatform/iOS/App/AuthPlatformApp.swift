@@ -204,7 +204,7 @@ private struct AuthenticationDemoView: View {
             recoveryAcknowledged = false
             status = "Vault key created. Export the recovery package and store the recovery code offline before synchronizing."
         } catch {
-            status = "Could not create the encrypted vault: \\(error.localizedDescription)"
+            status = "Could not create the encrypted vault: \(error.localizedDescription)"
         }
     }
 
@@ -220,7 +220,7 @@ private struct AuthenticationDemoView: View {
             recoveryCodeInput = ""
             status = "Vault key restored securely. Sign in, then synchronize to retrieve encrypted vault items."
         } catch {
-            status = "Vault recovery failed: \\(error.localizedDescription)"
+            status = "Vault recovery failed: \(error.localizedDescription)"
         }
     }
 
@@ -239,7 +239,7 @@ private struct AuthenticationDemoView: View {
             try await EncryptedVaultService.delete(credential, api: api, accessToken: refreshed.accessToken)
             status = "Credential deleted locally and a server tombstone was recorded for other devices."
         } catch {
-            status = "Credential was not deleted because secure synchronization could not be confirmed: \\(error.localizedDescription)"
+            status = "Credential was not deleted because secure synchronization could not be confirmed: \(error.localizedDescription)"
         }
     }
 
@@ -260,9 +260,9 @@ private struct AuthenticationDemoView: View {
             try AuthSessionVault.save(refreshToken: refreshed.refreshToken)
             currentAccessToken = refreshed.accessToken
             let changed = try await EncryptedVaultService.synchronize(api: api, accessToken: refreshed.accessToken)
-            status = "Encrypted vault synchronized. \\(changed) remote credential changes applied. The server received encrypted envelopes only."
+            status = "Encrypted vault synchronized. \(changed) remote credential changes applied. The server received encrypted envelopes only."
         } catch {
-            status = "Encrypted vault synchronization failed: \\(error.localizedDescription)"
+            status = "Encrypted vault synchronization failed: \(error.localizedDescription)"
         }
     }
 
