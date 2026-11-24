@@ -303,7 +303,9 @@ private struct AuthenticationDemoView: View {
             )
             status = "Credential encrypted, saved locally, and synchronized at the server's current item version."
         } catch {
-            status = "Credential saved locally only or not saved: \(error.localizedDescription)"
+            status = savedLocally
+                ? "Credential is saved on this iPhone, but cloud synchronization failed: \(error.localizedDescription)"
+                : "Credential could not be saved: \(error.localizedDescription)"
         }
     }
 
