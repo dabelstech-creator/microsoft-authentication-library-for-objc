@@ -60,7 +60,7 @@ Do not log the recovery code, package, plaintext credential, or master key. Do n
 
 1. Sign in with an email-verified AuthPlatform account.
 2. Choose **Create encrypted vault and recovery code**. The 256-bit master key is stored in the device-only Keychain; the recovery code is generated from 256 bits of secure randomness.
-3. Export the JSON recovery package using the iOS share sheet. Store the displayed recovery code separately and offline. Confirm the in-app acknowledgement before the first sync.
+3. Export the JSON recovery package as a `.json` file using the iOS file exporter. Store the displayed recovery code separately and offline. Confirm the in-app acknowledgement before the first sync.
 4. Save credentials only after the explicit **Save this sign-in to this iPhone** action. The AutoFill credential remains in the device-only shared Keychain; synchronization seals a Codable copy using AES-256-GCM with a fresh nonce and item-ID-bound AAD.
 5. Choose **Synchronize encrypted vault**. The app rotates its AuthPlatform refresh token, fetches the authenticated user's encrypted records, applies server tombstones, authenticates/decrypts active records, updates local Keychain credentials, and uploads the resulting local set as encrypted envelopes.
 6. To move to a replacement device, sign in, import the exported JSON package, enter the separately stored recovery code, and then synchronize. Restore is rejected if a vault key already exists on the device.
