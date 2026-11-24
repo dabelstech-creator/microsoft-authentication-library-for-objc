@@ -15,6 +15,9 @@ settings:
     SWIFT_VERSION: "6.2"
     IPHONEOS_DEPLOYMENT_TARGET: "17.0"
     TARGETED_DEVICE_FAMILY: "1,2"
+    AUTH_API_BASE_URL: "https://auth.moredesa.com"
+    AUTH_CREDENTIAL_SERVICE: "auth.moredesa.com"
+    AUTH_WEBAUTHN_RP_ID: "auth.moredesa.com"
 
 targets:
   AuthPlatform:
@@ -45,6 +48,7 @@ targets:
     sources:
       - path: CredentialProviderExtension
       - path: Authentication/SharedCredentialVault.swift
+      - path: Authentication/VaultCryptography.swift
       - path: Authentication/ApplePasswordManagerResources.swift
       - path: Resources/ApplePasswordManager
         buildPhase: resources
@@ -57,3 +61,15 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: com.dabelstech.authplatform.CredentialProviderExtension
         PRODUCT_NAME: CredentialProviderExtension
         APPLICATION_EXTENSION_API_ONLY: YES
+
+
+  AuthPlatformTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: AuthPlatform
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.dabelstech.authplatform.tests

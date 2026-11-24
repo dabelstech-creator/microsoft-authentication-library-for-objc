@@ -3,6 +3,16 @@ import Foundation
 import Security
 
 /// Client-side vault cryptography. The server receives only AES-GCM envelopes.
+
+/// Opaque client-encrypted record shared by the app, extension, and API client.
+struct EncryptedVaultItemEnvelope: Codable, Sendable, Equatable {
+    let clientItemID: UUID
+    let ciphertext: String
+    let nonce: String
+    let authenticationTag: String
+    let formatVersion: Int
+}
+
 enum VaultCryptography {
     static let formatVersion = 1
     private static let keychainService = "com.dabelstech.authplatform.vault-key"
@@ -17,14 +27,25 @@ enum VaultCryptography {
         let authenticationTag: String
     }
 
-    /// Create a random 256-bit master key and a one-time recovery code.
-    /// The caller must display the recovery code and require the user to save it safely.
+    /// Create a random 256-bit master key and a one-time recovery kit.
+    /// The caller must show the recovery code and let the user export the package.
     static func createVaultKey() throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
         guard !hasVaultKey() else { throw VaultError.keyAlreadyExists }
         let masterKey = SymmetricKey(size: .bits256)
-        let recoveryBytes = secureRandom(count: 32)
+        try storeMasterKey(masterKey)
+        return try makeRecoveryKit(for: masterKey)
+    }
+
+    /// Generate a fresh recovery code/package for the existing local vault key.
+    /// This does not replace or rotate the vault key, so existing encrypted items remain readable.
+    static func createRecoveryKit() throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
+        try makeRecoveryKit(for: loadMasterKey())
+    }
+
+    private static func makeRecoveryKit(for masterKey: SymmetricKey) throws -> (recoveryCode: String, recoveryPackage: RecoveryPackage) {
+        let recoveryBytes = try secureRandom(count: 32)
         let recoveryCode = recoveryBytes.base64URLEncodedString()
-        let salt = secureRandom(count: 16)
+        let salt = try secureRandom(count: 16)
         let wrappingKey = deriveWrappingKey(recoveryCode: recoveryCode, salt: salt)
         let nonce = AES.GCM.Nonce()
         let sealed = try AES.GCM.seal(masterKey.withUnsafeBytes { Data($0) },
@@ -38,18 +59,19 @@ enum VaultCryptography {
             ciphertext: sealed.ciphertext.base64EncodedString(),
             authenticationTag: sealed.tag.base64EncodedString()
         )
-        try storeMasterKey(masterKey)
         return (recoveryCode, package)
     }
 
     /// Restore a master key from the user-held recovery code and exported recovery package.
     static func restoreVaultKey(recoveryCode: String, package: RecoveryPackage) throws {
+        guard !hasVaultKey() else { throw VaultError.keyAlreadyExists }
         guard package.version == formatVersion,
               let salt = Data(base64Encoded: package.salt),
               salt.count == 16,
               let nonceData = Data(base64Encoded: package.nonce),
               nonceData.count == 12,
               let ciphertext = Data(base64Encoded: package.ciphertext),
+              ciphertext.count == 32,
               let tag = Data(base64Encoded: package.authenticationTag),
               tag.count == 16,
               let nonce = try? AES.GCM.Nonce(data: nonceData)
@@ -141,14 +163,12 @@ enum VaultCryptography {
     private static func storeMasterKey(_ key: SymmetricKey) throws {
         let data = key.withUnsafeBytes { Data($0) }
         let query = keychainQuery()
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let updateAttributes: [String: Any] = [kSecValueData as String: data]
+        let status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
         if status == errSecItemNotFound {
             var insert = query
-            attributes.forEach { insert[$0.key] = $0.value }
+            insert[kSecValueData as String] = data
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             let addStatus = SecItemAdd(insert as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw VaultError.keychain(addStatus) }
         } else if status != errSecSuccess {
@@ -169,10 +189,10 @@ enum VaultCryptography {
         return query
     }
 
-    private static func secureRandom(count: Int) -> Data {
+    private static func secureRandom(count: Int) throws -> Data {
         var bytes = [UInt8](repeating: 0, count: count)
         let status = SecRandomCopyBytes(kSecRandomDefault, count, &bytes)
-        precondition(status == errSecSuccess, "Secure random generation failed")
+        guard status == errSecSuccess else { throw VaultError.randomGeneration(status) }
         return Data(bytes)
     }
 
@@ -184,6 +204,7 @@ enum VaultCryptography {
         case authenticationFailed
         case keyUnavailable(OSStatus)
         case keychain(OSStatus)
+        case randomGeneration(OSStatus)
 
         var errorDescription: String? {
             switch self {
@@ -194,6 +215,7 @@ enum VaultCryptography {
             case .authenticationFailed: return "The encrypted vault item failed authentication and was not opened."
             case .keyUnavailable: return "The vault master key is unavailable. Restore it with your recovery code."
             case .keychain: return "The vault key could not be stored securely in Keychain."
+            case .randomGeneration: return "The system could not generate secure random bytes for the vault. No key was created."
             }
         }
     }

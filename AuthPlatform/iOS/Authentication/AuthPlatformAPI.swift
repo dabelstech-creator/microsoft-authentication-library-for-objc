@@ -15,23 +15,120 @@ struct AuthTokenResponse: Decodable {
 }
 
 
-/// An opaque AES-GCM envelope. Callers must encrypt locally before sending it.
-struct EncryptedVaultItemEnvelope: Codable, Sendable {
-    let clientItemID: UUID
-    let ciphertext: String
-    let nonce: String
-    let authenticationTag: String
-    let formatVersion: Int
-}
-
-/// A server record. The API returns tombstones so clients can propagate deletions.
+/// A versioned server record. Tombstones remain visible to every sync client.
 struct EncryptedVaultItemRecord: Decodable, Sendable {
     let clientItemID: UUID
     let ciphertext: String
     let nonce: String
     let authenticationTag: String
     let formatVersion: Int
+    let version: Int
     let isDeleted: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case clientItemID, ciphertext, nonce, authenticationTag, formatVersion, version, isDeleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        clientItemID = try values.decode(UUID.self, forKey: .clientItemID)
+        ciphertext = try values.decode(String.self, forKey: .ciphertext)
+        nonce = try values.decode(String.self, forKey: .nonce)
+        authenticationTag = try values.decode(String.self, forKey: .authenticationTag)
+        formatVersion = try values.decode(Int.self, forKey: .formatVersion)
+        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        isDeleted = try values.decode(Bool.self, forKey: .isDeleted)
+    }
+}
+
+struct PasskeyRegistrationOptions: Decodable {
+    let challengeID: UUID
+    let publicKey: PasskeyRegistrationPublicKey
+}
+
+struct PasskeyRegistrationPublicKey: Decodable {
+    let challenge: String
+    let rp: PasskeyRelyingParty
+    let user: PasskeyUserEntity
+}
+
+struct PasskeyRelyingParty: Decodable {
+    let id: String
+    let name: String
+}
+
+struct PasskeyUserEntity: Decodable {
+    let id: String
+    let name: String
+    let displayName: String
+}
+
+struct PasskeyAuthenticationOptions: Decodable {
+    let challengeID: UUID
+    let publicKey: PasskeyAuthenticationPublicKey
+}
+
+struct PasskeyAuthenticationPublicKey: Decodable {
+    let challenge: String
+    let rpId: String
+    let allowCredentials: [PasskeyCredentialDescriptor]?
+}
+
+struct PasskeyCredentialDescriptor: Decodable {
+    let id: String
+    let type: String
+}
+
+struct PasskeyRegistrationCredentialPayload: Encodable {
+    let id: String
+    let type = "public-key"
+    let rawId: String
+    let response: PasskeyAttestationResponsePayload
+}
+
+struct PasskeyAttestationResponsePayload: Encodable {
+    let clientDataJSON: String
+    let attestationObject: String
+}
+
+struct PasskeyAuthenticationCredentialPayload: Encodable {
+    let id: String
+    let rawId: String
+    let type = "public-key"
+    let authenticatorAttachment = "platform"
+    let response: PasskeyAssertionResponsePayload
+}
+
+struct PasskeyAssertionResponsePayload: Encodable {
+    let clientDataJSON: String
+    let authenticatorData: String
+    let signature: String
+    let userHandle: String?
+}
+
+private struct PasskeyRegistrationFinishRequest: Encodable {
+    let challengeID: UUID
+    let credential: PasskeyRegistrationCredentialPayload
+}
+
+private struct PasskeyAuthenticationFinishRequest: Encodable {
+    let challengeID: UUID
+    let credential: PasskeyAuthenticationCredentialPayload
+}
+
+private struct EncryptedVaultItemPage: Decodable {
+    let items: [EncryptedVaultItemRecord]
+    let nextOffset: Int?
+    let snapshot: String
+}
+
+private struct VaultWriteRequest: Encodable {
+    let clientItemID: UUID
+    let ciphertext: String
+    let nonce: String
+    let authenticationTag: String
+    let formatVersion: Int
+    let expectedVersion: Int?
 }
 
 enum AuthPlatformAPIError: LocalizedError {
@@ -82,43 +179,207 @@ final class AuthPlatformAPI {
     }
 
 
-    /// Fetches only the authenticated user's opaque encrypted vault records.
-    func listVaultItems(accessToken: String) async throws -> [EncryptedVaultItemRecord] {
-        var request = URLRequest(url: baseURL
-            .appendingPathComponent("v1")
-            .appendingPathComponent("vault")
-            .appendingPathComponent("items"))
-        request.httpMethod = "GET"
-        request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+    func register(email: String, password: String) async throws -> RegistrationResponse {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent("auth").appendingPathComponent("register"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(LoginRequest(email: email, password: password))
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
-        return try JSONDecoder().decode([EncryptedVaultItemRecord].self, from: data)
+        return try JSONDecoder().decode(RegistrationResponse.self, from: data)
     }
 
-    /// Uploads an already-encrypted envelope. Never pass plaintext credential data here.
-    func saveVaultItem(_ item: EncryptedVaultItemEnvelope, accessToken: String) async throws -> EncryptedVaultItemRecord {
+    func requestEmailVerification(email: String) async throws {
+        try await postMessage(path: ["v1", "auth", "verification", "request"], body: EmailRequest(email: email))
+    }
+
+    func verifyEmail(token: String) async throws {
+        try await postMessage(path: ["v1", "auth", "verify-email"], body: TokenRequest(token: token))
+    }
+
+    func requestPasswordReset(email: String) async throws {
+        try await postMessage(path: ["v1", "auth", "password", "forgot"], body: EmailRequest(email: email))
+    }
+
+    func resetPassword(token: String, newPassword: String) async throws {
+        try await postMessage(
+            path: ["v1", "auth", "password", "reset"],
+            body: PasswordResetRequest(token: token, newPassword: newPassword)
+        )
+    }
+
+    private func postMessage<Body: Encodable>(path: [String], body: Body) async throws {
+        var url = baseURL
+        for component in path { url.appendPathComponent(component) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+    }
+
+    func passkeyRegistrationOptions(accessToken: String) async throws -> PasskeyRegistrationOptions {
+        try await authenticatedPost(
+            path: ["v1", "passkeys", "registration", "options"],
+            body: EmptyRequest(),
+            accessToken: accessToken
+        )
+    }
+
+    func finishPasskeyRegistration(
+        challengeID: UUID,
+        credential: PasskeyRegistrationCredentialPayload,
+        accessToken: String
+    ) async throws {
+        let _: EmptyResponse = try await authenticatedPost(
+            path: ["v1", "passkeys", "registration", "verify"],
+            body: PasskeyRegistrationFinishRequest(challengeID: challengeID, credential: credential),
+            accessToken: accessToken
+        )
+    }
+
+    func passkeyAuthenticationOptions(email: String) async throws -> PasskeyAuthenticationOptions {
+        try await unauthenticatedPost(
+            path: ["v1", "passkeys", "authentication", "options"],
+            body: EmailRequest(email: email)
+        )
+    }
+
+    func finishPasskeyAuthentication(
+        challengeID: UUID,
+        credential: PasskeyAuthenticationCredentialPayload
+    ) async throws -> AuthTokenResponse {
+        try await unauthenticatedPost(
+            path: ["v1", "passkeys", "authentication", "verify"],
+            body: PasskeyAuthenticationFinishRequest(challengeID: challengeID, credential: credential)
+        )
+    }
+
+    private func authenticatedPost<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body,
+        accessToken: String
+    ) async throws -> Response {
+        try await post(path: path, body: body, accessToken: accessToken)
+    }
+
+    private func unauthenticatedPost<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body
+    ) async throws -> Response {
+        try await post(path: path, body: body, accessToken: nil)
+    }
+
+    private func post<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body,
+        accessToken: String?
+    ) async throws -> Response {
+        var url = baseURL
+        for component in path { url.appendPathComponent(component) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let accessToken {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+        return try JSONDecoder().decode(Response.self, from: data)
+    }
+
+    func logout(refreshToken: String) async throws {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent("auth").appendingPathComponent("logout"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(RefreshRequest(refreshToken: refreshToken))
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+    }
+
+    /// Fetches all pages from one stable server snapshot.
+    func listVaultItems(accessToken: String) async throws -> [EncryptedVaultItemRecord] {
+        let endpoint = baseURL
+            .appendingPathComponent("v2")
+            .appendingPathComponent("vault")
+            .appendingPathComponent("items")
+        var offset = 0
+        var snapshot: String?
+        var result: [EncryptedVaultItemRecord] = []
+
+        while true {
+            guard var components = URLComponents(url: endpoint, resolvingAgainstBaseURL: false) else {
+                throw AuthPlatformAPIError.invalidResponse
+            }
+            var query = [
+                URLQueryItem(name: "limit", value: "100"),
+                URLQueryItem(name: "offset", value: String(offset))
+            ]
+            if let snapshot {
+                query.append(URLQueryItem(name: "snapshot", value: snapshot))
+            }
+            components.queryItems = query
+            guard let url = components.url else { throw AuthPlatformAPIError.invalidResponse }
+
+            var request = URLRequest(url: url)
+            request.httpMethod = "GET"
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+            let (data, response) = try await session.data(for: request)
+            try Self.validate(response: response, data: data)
+            if let page = try? JSONDecoder().decode(EncryptedVaultItemPage.self, from: data) {
+                result.append(contentsOf: page.items)
+                guard let nextOffset = page.nextOffset else { break }
+                guard nextOffset > offset else { throw AuthPlatformAPIError.invalidResponse }
+                offset = nextOffset
+                snapshot = page.snapshot
+            } else if offset == 0 {
+                // Backward-compatible read path for servers before versioned pagination.
+                result.append(contentsOf: try JSONDecoder().decode([EncryptedVaultItemRecord].self, from: data))
+                break
+            } else {
+                throw AuthPlatformAPIError.invalidResponse
+            }
+        }
+        return result
+    }
+
+    /// Uploads a locally encrypted envelope with compare-and-swap version semantics.
+    func saveVaultItem(
+        _ item: EncryptedVaultItemEnvelope,
+        expectedVersion: Int? = nil,
+        accessToken: String
+    ) async throws -> EncryptedVaultItemRecord {
         var request = URLRequest(url: baseURL
-            .appendingPathComponent("v1")
+            .appendingPathComponent("v2")
             .appendingPathComponent("vault")
             .appendingPathComponent("items"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
-        request.httpBody = try JSONEncoder().encode(item)
+        request.httpBody = try JSONEncoder().encode(VaultWriteRequest(
+            clientItemID: item.clientItemID,
+            ciphertext: item.ciphertext,
+            nonce: item.nonce,
+            authenticationTag: item.authenticationTag,
+            formatVersion: item.formatVersion,
+            expectedVersion: expectedVersion
+        ))
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
         return try JSONDecoder().decode(EncryptedVaultItemRecord.self, from: data)
     }
 
-    /// Creates a server-side tombstone so deletion can propagate to other devices.
-    func deleteVaultItem(clientItemID: UUID, accessToken: String) async throws {
+    func deleteVaultItem(clientItemID: UUID, expectedVersion: Int, accessToken: String) async throws {
         var request = URLRequest(url: baseURL
-            .appendingPathComponent("v1")
+            .appendingPathComponent("v2")
             .appendingPathComponent("vault")
             .appendingPathComponent("items")
             .appendingPathComponent(clientItemID.uuidString))
         request.httpMethod = "DELETE"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(String(expectedVersion), forHTTPHeaderField: "If-Match")
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
     }
@@ -154,6 +415,38 @@ final class AuthPlatformAPI {
     }
 }
 
+private struct EmptyRequest: Encodable {}
+private struct EmptyResponse: Decodable {}
+
+extension Data {
+    func webAuthnBase64URLEncodedString() -> String {
+        base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+
+}
+
+struct RegistrationResponse: Decodable, Sendable {
+    let userID: UUID
+    let emailVerificationRequired: Bool
+}
+
+private struct EmailRequest: Encodable {
+    let email: String
+}
+
+private struct TokenRequest: Encodable {
+    let token: String
+}
+
+private struct PasswordResetRequest: Encodable {
+    let token: String
+    let newPassword: String
+}
+
 private struct LoginRequest: Encodable {
     let email: String
     let password: String
@@ -187,6 +480,21 @@ enum AuthSessionVault {
             let addStatus = SecItemAdd(add as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw AuthSessionVaultError.keychain(addStatus) }
         } else if status != errSecSuccess {
+            throw AuthSessionVaultError.keychain(status)
+        }
+    }
+
+    static func deleteRefreshToken() throws {
+        var query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account
+        ]
+        if let group = Bundle.main.object(forInfoDictionaryKey: "CredentialKeychainAccessGroup") as? String {
+            query[kSecAttrAccessGroup as String] = group
+        }
+        let status = SecItemDelete(query as CFDictionary)
+        guard status == errSecSuccess || status == errSecItemNotFound else {
             throw AuthSessionVaultError.keychain(status)
         }
     }
