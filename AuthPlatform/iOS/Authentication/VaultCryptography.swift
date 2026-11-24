@@ -163,14 +163,12 @@ enum VaultCryptography {
     private static func storeMasterKey(_ key: SymmetricKey) throws {
         let data = key.withUnsafeBytes { Data($0) }
         let query = keychainQuery()
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-        let status = SecItemUpdate(query as CFDictionary, attributes as CFDictionary)
+        let updateAttributes: [String: Any] = [kSecValueData as String: data]
+        let status = SecItemUpdate(query as CFDictionary, updateAttributes as CFDictionary)
         if status == errSecItemNotFound {
             var insert = query
-            attributes.forEach { insert[$0.key] = $0.value }
+            insert[kSecValueData as String] = data
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             let addStatus = SecItemAdd(insert as CFDictionary, nil)
             guard addStatus == errSecSuccess else { throw VaultError.keychain(addStatus) }
         } else if status != errSecSuccess {
