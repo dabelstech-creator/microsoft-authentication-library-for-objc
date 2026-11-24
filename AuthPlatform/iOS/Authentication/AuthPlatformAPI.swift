@@ -71,7 +71,7 @@ struct PasskeyAuthenticationOptions: Decodable {
 struct PasskeyAuthenticationPublicKey: Decodable {
     let challenge: String
     let rpId: String
-    let allowCredentials: [PasskeyCredentialDescriptor]
+    let allowCredentials: [PasskeyCredentialDescriptor]?
 }
 
 struct PasskeyCredentialDescriptor: Decodable {
