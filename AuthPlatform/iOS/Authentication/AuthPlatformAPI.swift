@@ -41,6 +41,81 @@ struct EncryptedVaultItemRecord: Decodable, Sendable {
     }
 }
 
+struct PasskeyRegistrationOptions: Decodable {
+    let challengeID: UUID
+    let publicKey: PasskeyRegistrationPublicKey
+}
+
+struct PasskeyRegistrationPublicKey: Decodable {
+    let challenge: String
+    let rp: PasskeyRelyingParty
+    let user: PasskeyUserEntity
+}
+
+struct PasskeyRelyingParty: Decodable {
+    let id: String
+    let name: String
+}
+
+struct PasskeyUserEntity: Decodable {
+    let id: String
+    let name: String
+    let displayName: String
+}
+
+struct PasskeyAuthenticationOptions: Decodable {
+    let challengeID: UUID
+    let publicKey: PasskeyAuthenticationPublicKey
+}
+
+struct PasskeyAuthenticationPublicKey: Decodable {
+    let challenge: String
+    let rpId: String
+    let allowCredentials: [PasskeyCredentialDescriptor]
+}
+
+struct PasskeyCredentialDescriptor: Decodable {
+    let id: String
+    let type: String
+}
+
+struct PasskeyRegistrationCredentialPayload: Encodable {
+    let id: String
+    let type = "public-key"
+    let rawId: String
+    let response: PasskeyAttestationResponsePayload
+}
+
+struct PasskeyAttestationResponsePayload: Encodable {
+    let clientDataJSON: String
+    let attestationObject: String
+}
+
+struct PasskeyAuthenticationCredentialPayload: Encodable {
+    let id: String
+    let rawId: String
+    let type = "public-key"
+    let authenticatorAttachment = "platform"
+    let response: PasskeyAssertionResponsePayload
+}
+
+struct PasskeyAssertionResponsePayload: Encodable {
+    let clientDataJSON: String
+    let authenticatorData: String
+    let signature: String
+    let userHandle: String?
+}
+
+private struct PasskeyRegistrationFinishRequest: Encodable {
+    let challengeID: UUID
+    let credential: PasskeyRegistrationCredentialPayload
+}
+
+private struct PasskeyAuthenticationFinishRequest: Encodable {
+    let challengeID: UUID
+    let credential: PasskeyAuthenticationCredentialPayload
+}
+
 private struct EncryptedVaultItemPage: Decodable {
     let items: [EncryptedVaultItemRecord]
     let nextOffset: Int?
@@ -142,6 +217,77 @@ final class AuthPlatformAPI {
         request.httpBody = try JSONEncoder().encode(body)
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
+    }
+
+    func passkeyRegistrationOptions(accessToken: String) async throws -> PasskeyRegistrationOptions {
+        try await authenticatedPost(
+            path: ["v1", "passkeys", "registration", "options"],
+            body: EmptyRequest(),
+            accessToken: accessToken
+        )
+    }
+
+    func finishPasskeyRegistration(
+        challengeID: UUID,
+        credential: PasskeyRegistrationCredentialPayload,
+        accessToken: String
+    ) async throws {
+        let _: EmptyResponse = try await authenticatedPost(
+            path: ["v1", "passkeys", "registration", "verify"],
+            body: PasskeyRegistrationFinishRequest(challengeID: challengeID, credential: credential),
+            accessToken: accessToken
+        )
+    }
+
+    func passkeyAuthenticationOptions(email: String) async throws -> PasskeyAuthenticationOptions {
+        try await unauthenticatedPost(
+            path: ["v1", "passkeys", "authentication", "options"],
+            body: EmailRequest(email: email)
+        )
+    }
+
+    func finishPasskeyAuthentication(
+        challengeID: UUID,
+        credential: PasskeyAuthenticationCredentialPayload
+    ) async throws -> AuthTokenResponse {
+        try await unauthenticatedPost(
+            path: ["v1", "passkeys", "authentication", "verify"],
+            body: PasskeyAuthenticationFinishRequest(challengeID: challengeID, credential: credential)
+        )
+    }
+
+    private func authenticatedPost<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body,
+        accessToken: String
+    ) async throws -> Response {
+        try await post(path: path, body: body, accessToken: accessToken)
+    }
+
+    private func unauthenticatedPost<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body
+    ) async throws -> Response {
+        try await post(path: path, body: body, accessToken: nil)
+    }
+
+    private func post<Body: Encodable, Response: Decodable>(
+        path: [String],
+        body: Body,
+        accessToken: String?
+    ) async throws -> Response {
+        var url = baseURL
+        for component in path { url.appendPathComponent(component) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        if let accessToken {
+            request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        }
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+        return try JSONDecoder().decode(Response.self, from: data)
     }
 
     func logout(refreshToken: String) async throws {
@@ -266,6 +412,29 @@ final class AuthPlatformAPI {
                 ?? HTTPURLResponse.localizedString(forStatusCode: http.statusCode)
             throw AuthPlatformAPIError.rejected(http.statusCode, message)
         }
+    }
+}
+
+private struct EmptyRequest: Encodable {}
+private struct EmptyResponse: Decodable {}
+
+private extension Data {
+    func base64URLEncodedString() -> String {
+        base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+    }
+
+    init?(base64URLEncoded value: String) {
+        var base64 = value
+            .replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        let remainder = base64.count % 4
+        if remainder != 0 {
+            base64 += String(repeating: "=", count: 4 - remainder)
+        }
+        self.init(base64Encoded: base64)
     }
 }
 
