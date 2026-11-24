@@ -82,6 +82,18 @@ final class EncryptedVaultAPITests: XCTestCase {
             formatVersion: 1
         )
 
+        try await app.test(.POST, "v1/vault/items", beforeRequest: { request in
+            request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
+            try request.content.encode(payload)
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .upgradeRequired)
+        })
+        try await app.test(.DELETE, "v1/vault/items/\(itemID.uuidString)", beforeRequest: { request in
+            request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .upgradeRequired)
+        })
+
         try await app.test(.POST, "v2/vault/items", beforeRequest: { request in
             request.headers.bearerAuthorization = BearerAuthorization(token: accessToken)
             try request.content.encode(payload)
