@@ -59,7 +59,7 @@ final class VaultCryptographyTests: XCTestCase {
 
     func testSharedCredentialVaultStoresAndRetrievesEncryptedRecords() throws {
         _ = try VaultCryptography.createVaultKey()
-        let service = "test-\\(UUID().uuidString.lowercased()).example"
+        let service = "test-\(UUID().uuidString.lowercased()).example"
         let credential = StoredPasswordCredential(
             service: service,
             username: "autofill-user@example.test",
