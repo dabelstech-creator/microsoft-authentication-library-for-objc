@@ -172,16 +172,19 @@ public enum SharedCredentialVault {
     private static func store(_ envelope: EncryptedVaultItemEnvelope, account: String) throws {
         let data = try JSONEncoder().encode(envelope)
         let base = query(account: account)
-        let attributes: [String: Any] = [
-            kSecValueData as String: data,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-        ]
-        let status = SecItemUpdate(base as CFDictionary, attributes as CFDictionary)
+        let updateAttributes: [String: Any] = [kSecValueData as String: data]
+        let status = SecItemUpdate(base as CFDictionary, updateAttributes as CFDictionary)
         if status == errSecItemNotFound {
             var insert = base
-            attributes.forEach { insert[$0.key] = $0.value }
+            insert[kSecValueData as String] = data
+            insert[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
             let addStatus = SecItemAdd(insert as CFDictionary, nil)
-            guard addStatus == errSecSuccess else { throw VaultError.keychain(addStatus) }
+            if addStatus == errSecDuplicateItem {
+                let retryStatus = SecItemUpdate(base as CFDictionary, updateAttributes as CFDictionary)
+                guard retryStatus == errSecSuccess else { throw VaultError.keychain(retryStatus) }
+            } else if addStatus != errSecSuccess {
+                throw VaultError.keychain(addStatus)
+            }
         } else if status != errSecSuccess {
             throw VaultError.keychain(status)
         }
