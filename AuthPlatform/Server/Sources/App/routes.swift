@@ -1053,8 +1053,8 @@ func routes(_ app: Application) throws {
             guard let sql = database as? SQLDatabase else {
                 throw Abort(.internalServerError, reason: "Versioned vault writes require PostgreSQL.")
             }
-            let lockKey = "vault:\\(userID.uuidString):\\(input.clientItemID.uuidString)"
-            _ = try await sql.raw("SELECT pg_advisory_xact_lock(hashtext(\\(bind: lockKey)))").all()
+            let lockKey = "vault:\(userID.uuidString):\(input.clientItemID.uuidString)"
+            _ = try await sql.raw("SELECT pg_advisory_xact_lock(hashtext(\(bind: lockKey)))").all()
             _ = try await sql.raw("""
                 SELECT id FROM encrypted_vault_items
                 WHERE user_id = \(bind: userID) AND client_item_id = \(bind: input.clientItemID)
@@ -1130,8 +1130,8 @@ func routes(_ app: Application) throws {
             guard let sql = database as? SQLDatabase else {
                 throw Abort(.internalServerError, reason: "Versioned vault deletion requires PostgreSQL.")
             }
-            let lockKey = "vault:\\(userID.uuidString):\\(clientItemID.uuidString)"
-            _ = try await sql.raw("SELECT pg_advisory_xact_lock(hashtext(\\(bind: lockKey)))").all()
+            let lockKey = "vault:\(userID.uuidString):\(clientItemID.uuidString)"
+            _ = try await sql.raw("SELECT pg_advisory_xact_lock(hashtext(\(bind: lockKey)))").all()
             _ = try await sql.raw("""
                 SELECT id FROM encrypted_vault_items
                 WHERE user_id = \(bind: userID) AND client_item_id = \(bind: clientItemID)
