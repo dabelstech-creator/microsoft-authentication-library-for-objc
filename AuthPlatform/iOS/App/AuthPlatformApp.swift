@@ -101,7 +101,7 @@ private struct AuthenticationDemoView: View {
                             Text("No credentials are saved on this iPhone.")
                                 .font(.footnote)
                         } else {
-                            ForEach(Array(savedCredentials.enumerated()), id: \.offset) { _, credential in
+                            ForEach(savedCredentials) { credential in
                                 HStack {
                                     VStack(alignment: .leading) {
                                         Text(credential.username)
