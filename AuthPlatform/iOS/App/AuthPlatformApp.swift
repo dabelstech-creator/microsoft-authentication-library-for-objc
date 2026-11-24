@@ -35,6 +35,10 @@ private struct AuthenticationDemoView: View {
     @State private var showRecoveryImporter = false
     @State private var recoveryAcknowledged = false
 
+    private var savedCredentials: [StoredPasswordCredential] {
+        (try? SharedCredentialVault.allCredentials()) ?? []
+    }
+
     private var service: String {
         Bundle.main.object(forInfoDictionaryKey: "AUTH_CREDENTIAL_SERVICE") as? String ?? "auth.example.com"
     }
@@ -92,6 +96,31 @@ private struct AuthenticationDemoView: View {
                 }
 
                 if signedIn {
+                    Section("Manage saved credentials") {
+                        if savedCredentials.isEmpty {
+                            Text("No credentials are saved on this iPhone.")
+                                .font(.footnote)
+                        } else {
+                            ForEach(Array(savedCredentials.enumerated()), id: \.offset) { _, credential in
+                                HStack {
+                                    VStack(alignment: .leading) {
+                                        Text(credential.username)
+                                        Text(credential.service)
+                                            .font(.caption)
+                                            .foregroundStyle(.secondary)
+                                    }
+                                    Spacer()
+                                    Button("Delete", role: .destructive) {
+                                        Task { await deleteSavedCredential(credential) }
+                                    }
+                                    .disabled(isBusy)
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if signedIn {
                     Section("Encrypted cloud vault") {
                         if VaultCryptography.hasVaultKey() {
                             Label("Vault encryption key is available in this iPhone's Keychain", systemImage: "lock.shield")
@@ -99,7 +128,7 @@ private struct AuthenticationDemoView: View {
                             Button("Synchronize encrypted vault") {
                                 Task { await synchronizeEncryptedVault() }
                             }
-                            .disabled(isBusy || currentAccessToken.isEmpty)
+                            .disabled(isBusy || currentAccessToken.isEmpty || (!recoveryCode.isEmpty && !recoveryAcknowledged))
                         } else {
                             Text("Create a vault key before enabling encrypted cloud synchronization. The server will receive ciphertext only.")
                                 .font(.footnote)
@@ -192,6 +221,25 @@ private struct AuthenticationDemoView: View {
             status = "Vault key restored securely. Sign in, then synchronize to retrieve encrypted vault items."
         } catch {
             status = "Vault recovery failed: \\(error.localizedDescription)"
+        }
+    }
+
+    private func deleteSavedCredential(_ credential: StoredPasswordCredential) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            guard let refreshToken = try AuthSessionVault.refreshToken() else {
+                status = "Sign in again before deleting a synchronized credential."
+                return
+            }
+            let api = try AuthPlatformAPI()
+            let refreshed = try await api.refresh(refreshToken: refreshToken)
+            try AuthSessionVault.save(refreshToken: refreshed.refreshToken)
+            currentAccessToken = refreshed.accessToken
+            try await EncryptedVaultService.delete(credential, api: api, accessToken: refreshed.accessToken)
+            status = "Credential deleted locally and a server tombstone was recorded for other devices."
+        } catch {
+            status = "Credential was not deleted because secure synchronization could not be confirmed: \\(error.localizedDescription)"
         }
     }
 
