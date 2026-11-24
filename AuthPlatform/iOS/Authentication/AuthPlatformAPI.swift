@@ -106,7 +106,7 @@ final class AuthPlatformAPI {
     /// are deferred to the next sync instead of shifting the current result set.
     func listVaultItems(accessToken: String) async throws -> [EncryptedVaultItemRecord] {
         let endpoint = baseURL
-            .appendingPathComponent("v1")
+            .appendingPathComponent("v2")
             .appendingPathComponent("vault")
             .appendingPathComponent("items")
         var offset = 0
@@ -150,7 +150,7 @@ final class AuthPlatformAPI {
         accessToken: String
     ) async throws -> EncryptedVaultItemRecord {
         var request = URLRequest(url: baseURL
-            .appendingPathComponent("v1")
+            .appendingPathComponent("v2")
             .appendingPathComponent("vault")
             .appendingPathComponent("items"))
         request.httpMethod = "POST"
@@ -172,7 +172,7 @@ final class AuthPlatformAPI {
     /// Creates a version-checked tombstone so deletion propagates without allowing stale resurrection.
     func deleteVaultItem(clientItemID: UUID, expectedVersion: Int, accessToken: String) async throws {
         var request = URLRequest(url: baseURL
-            .appendingPathComponent("v1")
+            .appendingPathComponent("v2")
             .appendingPathComponent("vault")
             .appendingPathComponent("items")
             .appendingPathComponent(clientItemID.uuidString))
