@@ -2,8 +2,8 @@ import AuthenticationServices
 import LocalAuthentication
 import UIKit
 
-/// Add this source to a separate iOS Credential Provider Extension target.
-/// The containing app and extension must share a Keychain access group.
+/// Credential Provider Extension. Credential secrets are decrypted only after
+/// the user completes device-owner authentication.
 final class CredentialProviderViewController: ASCredentialProviderViewController {
     override func prepareCredentialList(for serviceIdentifiers: [ASCredentialServiceIdentifier]) {
         let domains = serviceIdentifiers
@@ -12,8 +12,8 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let candidateDomains = Set(domains.flatMap { domain in
             [domain] + ApplePasswordManagerResources.shared.relatedCredentialDomains(for: domain)
         })
-        let matches = candidateDomains.sorted().flatMap { domain -> [StoredPasswordCredential] in
-            (try? SharedCredentialVault.credentials(for: domain)) ?? []
+        let matches = candidateDomains.sorted().flatMap { domain -> [StoredCredentialIdentity] in
+            (try? SharedCredentialVault.credentialIdentities(for: domain)) ?? []
         }
         guard !matches.isEmpty else {
             extensionContext.cancelRequest(withError: ASExtensionError(.userCanceled))
@@ -23,7 +23,7 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
         let picker = UIAlertController(title: "Choose a sign-in", message: nil, preferredStyle: .alert)
         for item in matches {
             picker.addAction(UIAlertAction(title: "\(item.username) · \(item.service)", style: .default) { [weak self] _ in
-                self?.authenticateAndProvide(item)
+                self?.authenticateAndProvide(service: item.service, username: item.username)
             })
         }
         picker.addAction(UIAlertAction(title: "Cancel", style: .cancel) { [weak self] _ in
@@ -33,27 +33,18 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
     }
 
     override func prepareInterfaceToProvideCredential(for credentialIdentity: ASPasswordCredentialIdentity) {
-        do {
-            guard let item = try SharedCredentialVault.credential(
-                service: credentialIdentity.serviceIdentifier.identifier,
-                username: credentialIdentity.user
-            ) else {
-                extensionContext.cancelRequest(withError: ASExtensionError(.userCanceled))
-                return
-            }
-            authenticateAndProvide(item)
-        } catch {
-            extensionContext.cancelRequest(withError: error)
-        }
+        authenticateAndProvide(
+            service: credentialIdentity.serviceIdentifier.identifier,
+            username: credentialIdentity.user
+        )
     }
 
     override func provideCredentialWithoutUserInteraction(for credentialIdentity: ASPasswordCredentialIdentity) {
-        // Do not release passwords silently. Require an explicit user-presence
-        // authentication in the extension UI before returning a secret.
+        // Do not release passwords silently. Require explicit user presence.
         extensionContext.cancelRequest(withError: ASExtensionError(.userInteractionRequired))
     }
 
-    private func authenticateAndProvide(_ item: StoredPasswordCredential) {
+    private func authenticateAndProvide(service: String, username: String) {
         let context = LAContext()
         context.localizedCancelTitle = "Cancel"
         context.evaluatePolicy(.deviceOwnerAuthentication, localizedReason: "Unlock a saved sign-in") { [weak self] success, error in
@@ -63,8 +54,17 @@ final class CredentialProviderViewController: ASCredentialProviderViewController
                     self.extensionContext.cancelRequest(withError: error ?? ASExtensionError(.userCanceled))
                     return
                 }
-                let credential = ASPasswordCredential(user: item.username, password: item.password)
-                self.extensionContext.completeRequest(withSelectedCredential: credential, completionHandler: nil)
+                do {
+                    // Only decrypt after successful Face ID / Touch ID / passcode authentication.
+                    guard let item = try SharedCredentialVault.credential(service: service, username: username) else {
+                        self.extensionContext.cancelRequest(withError: ASExtensionError(.userCanceled))
+                        return
+                    }
+                    let credential = ASPasswordCredential(user: item.username, password: item.password)
+                    self.extensionContext.completeRequest(withSelectedCredential: credential, completionHandler: nil)
+                } catch {
+                    self.extensionContext.cancelRequest(withError: error)
+                }
             }
         }
     }
