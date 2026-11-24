@@ -90,7 +90,7 @@ jobs:
             --project "$RAILWAY_PROJECT_ID" \
             --environment "$RAILWAY_STAGING_ENVIRONMENT_ID" \
             --service "$RAILWAY_STAGING_SERVICE_ID" \
-            --detach
+            --ci
 
       - name: Verify deployed staging health endpoint
         run: |
