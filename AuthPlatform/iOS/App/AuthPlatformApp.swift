@@ -192,7 +192,7 @@ private struct AuthenticationDemoView: View {
                 ? "Account created. Check your email for the verification link, then paste its token above."
                 : "Account created. You can now sign in."
         } catch {
-            status = "Account registration failed: \\(error.localizedDescription)"
+            status = "Account registration failed: \(error.localizedDescription)"
         }
     }
 
@@ -203,7 +203,7 @@ private struct AuthenticationDemoView: View {
             try await AuthPlatformAPI().requestEmailVerification(email: username)
             status = "If the account exists and needs verification, a verification email has been sent."
         } catch {
-            status = "Could not request email verification: \\(error.localizedDescription)"
+            status = "Could not request email verification: \(error.localizedDescription)"
         }
     }
 
@@ -215,7 +215,7 @@ private struct AuthenticationDemoView: View {
             verificationCode = ""
             status = "Email verified. Sign in to continue."
         } catch {
-            status = "Email verification failed: \\(error.localizedDescription)"
+            status = "Email verification failed: \(error.localizedDescription)"
         }
     }
 
@@ -226,7 +226,7 @@ private struct AuthenticationDemoView: View {
             try await AuthPlatformAPI().requestPasswordReset(email: username)
             status = "If the account exists, password-reset instructions have been sent."
         } catch {
-            status = "Could not request password recovery: \\(error.localizedDescription)"
+            status = "Could not request password recovery: \(error.localizedDescription)"
         }
     }
 
@@ -239,7 +239,7 @@ private struct AuthenticationDemoView: View {
             newPassword = ""
             status = "Password reset successfully. Sign in with the new password."
         } catch {
-            status = "Password reset failed: \\(error.localizedDescription)"
+            status = "Password reset failed: \(error.localizedDescription)"
         }
     }
 
