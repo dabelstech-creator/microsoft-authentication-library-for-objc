@@ -51,7 +51,7 @@ URLs pointed at the same staging database.
 In repository Settings → Environments, create an environment named
 `staging`. Add:
 
-- Secret `RAILWAY_API_TOKEN` (the existing Railway API token may be stored here)
+- Secret `RAILWAY_STAGING_TOKEN` (create a Railway project token scoped to the staging environment; do not reuse the workspace-wide API token)
 - Secret `RAILWAY_STAGING_ENVIRONMENT_ID`
 - Secret `RAILWAY_STAGING_SERVICE_ID`
 - Secret `RAILWAY_STAGING_HEALTHCHECK_URL` (the exact HTTPS URL ending in
