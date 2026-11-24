@@ -859,17 +859,27 @@ func routes(_ app: Application) throws {
     app.post("v1", "auth", "logout") { request async throws -> HTTPStatus in
         let input = try request.content.decode(RefreshRequest.self)
         let digest = tokenDigest(input.refreshToken)
-        guard let record = try await RefreshTokenRecord.query(on: request.db)
-            .filter(\.$tokenHash == digest).first(),
-              let session = try await AuthSession.find(record.sessionID, on: request.db)
-        else {
-            return .noContent
+        try await request.db.transaction { database in
+            guard let sql = database as? SQLDatabase else {
+                throw Abort(.internalServerError, reason: "Atomic session revocation requires PostgreSQL.")
+            }
+            _ = try await sql.raw("""
+                SELECT id FROM refresh_token_records
+                WHERE token_hash = \(bind: digest)
+                FOR UPDATE
+                """).all()
+
+            guard let record = try await RefreshTokenRecord.query(on: database)
+                .filter(\.$tokenHash == digest).first(),
+                  let session = try await AuthSession.find(record.sessionID, on: database)
+            else { return }
+
+            let now = Date()
+            record.revokedAt = now
+            try await record.save(on: database)
+            session.revokedAt = now
+            try await session.save(on: database)
         }
-        let now = Date()
-        record.revokedAt = now
-        try await record.save(on: request.db)
-        session.revokedAt = now
-        try await session.save(on: request.db)
         return .noContent
     }
 
