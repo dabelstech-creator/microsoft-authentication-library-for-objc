@@ -1,0 +1,104 @@
+name: Deploy AuthPlatform to Railway staging
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_staging_deploy:
+        description: Type deploy-staging to authorize a staging deployment
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authplatform-railway-staging
+  cancel-in-progress: false
+
+jobs:
+  validate-and-deploy:
+    if: ${{ inputs.confirm_staging_deploy == 'deploy-staging' }}
+    runs-on: ubuntu-latest
+    environment: staging
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: authplatform_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d authplatform_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      DATABASE_URL: postgres://postgres:postgres@localhost:5432/authplatform_test?sslmode=disable
+      HOST: 127.0.0.1
+      PORT: 8080
+      WEBAUTHN_RP_ID: localhost
+      WEBAUTHN_RP_NAME: AuthPlatform CI
+      WEBAUTHN_ORIGIN: http://localhost
+      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      RAILWAY_PROJECT_ID: ${{ vars.RAILWAY_PROJECT_ID }}
+      RAILWAY_STAGING_ENVIRONMENT_ID: ${{ secrets.RAILWAY_STAGING_ENVIRONMENT_ID }}
+      RAILWAY_STAGING_SERVICE_ID: ${{ secrets.RAILWAY_STAGING_SERVICE_ID }}
+      RAILWAY_STAGING_HEALTHCHECK_URL: ${{ secrets.RAILWAY_STAGING_HEALTHCHECK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Swift 6.2
+        uses: swift-actions/setup-swift@v2
+        with:
+          swift-version: "6.2"
+
+      - name: Resolve Vapor dependencies
+        working-directory: AuthPlatform/Server
+        run: swift package resolve
+
+      - name: Build Vapor service
+        working-directory: AuthPlatform/Server
+        run: swift build -c release
+
+      - name: Run PostgreSQL integration tests
+        working-directory: AuthPlatform/Server
+        run: swift test
+
+      - name: Validate Railway staging configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+          for name in RAILWAY_API_TOKEN RAILWAY_PROJECT_ID RAILWAY_STAGING_ENVIRONMENT_ID RAILWAY_STAGING_SERVICE_ID RAILWAY_STAGING_HEALTHCHECK_URL; do
+            if [ -z "\${!name:-}" ]; then
+              echo "::error::Missing required GitHub staging environment secret/variable: $name"
+              exit 1
+            fi
+          done
+          case "$RAILWAY_STAGING_HEALTHCHECK_URL" in
+            https://*) ;;
+            *) echo "::error::The staging health-check URL must use HTTPS."; exit 1 ;;
+          esac
+
+      - name: Install Railway CLI
+        run: npm install --global @railway/cli
+
+      - name: Deploy Dockerfile.railway to the staging service
+        run: |
+          railway up \
+            --project "$RAILWAY_PROJECT_ID" \
+            --environment "$RAILWAY_STAGING_ENVIRONMENT_ID" \
+            --service "$RAILWAY_STAGING_SERVICE_ID" \
+            --detach
+
+      - name: Verify deployed staging health endpoint
+        run: |
+          for attempt in $(seq 1 30); do
+            if curl --fail --silent --show-error "$RAILWAY_STAGING_HEALTHCHECK_URL"; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::AuthPlatform staging health check did not become healthy."
+          exit 1
