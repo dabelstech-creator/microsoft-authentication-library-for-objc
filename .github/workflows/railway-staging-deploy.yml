@@ -71,7 +71,7 @@ jobs:
         run: |
           set -euo pipefail
           for name in RAILWAY_API_TOKEN RAILWAY_PROJECT_ID RAILWAY_STAGING_ENVIRONMENT_ID RAILWAY_STAGING_SERVICE_ID RAILWAY_STAGING_HEALTHCHECK_URL; do
-            if [ -z "\${!name:-}" ]; then
+            if [ -z "${!name:-}" ]; then
               echo "::error::Missing required GitHub staging environment secret/variable: $name"
               exit 1
             fi
