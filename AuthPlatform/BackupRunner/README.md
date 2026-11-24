@@ -27,7 +27,7 @@ Build the image from the repository root using this Dockerfile, in Oregon. Confi
 
 ## Dropbox app setup
 
-Create a Dropbox app with scoped access to an app folder if possible. Grant only `files.content.write` and `files.metadata.read`; create the target folder under that app folder or set `DROPBOX_DEST` to the app-folder-relative destination. Generate a short-lived token for the one-time run and revoke it after upload.
+Because the staging folder was created at the Dropbox account root (`/AuthPlatform Backups`), configure the Dropbox app for **Full Dropbox** access, but grant only the `files.content.write` and `files.metadata.read` OAuth scopes. Do not grant sharing scopes. If you prefer App Folder access, create a separate folder inside that app's `/` namespace and change `DROPBOX_DEST` to that app-folder-relative path. Generate a short-lived token for the one-time run and revoke it after upload.
 
 ## Decryption
 
