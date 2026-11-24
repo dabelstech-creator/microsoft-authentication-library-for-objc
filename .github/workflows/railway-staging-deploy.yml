@@ -41,7 +41,7 @@ jobs:
       WEBAUTHN_RP_ID: localhost
       WEBAUTHN_RP_NAME: AuthPlatform CI
       WEBAUTHN_ORIGIN: http://localhost
-      RAILWAY_API_TOKEN: ${{ secrets.RAILWAY_API_TOKEN }}
+      RAILWAY_TOKEN: ${{ secrets.RAILWAY_STAGING_TOKEN }}
       RAILWAY_PROJECT_ID: "5d8c3286-4f2c-4a25-b8da-daf2024b4739"
       RAILWAY_STAGING_ENVIRONMENT_ID: ${{ secrets.RAILWAY_STAGING_ENVIRONMENT_ID }}
       RAILWAY_STAGING_SERVICE_ID: ${{ secrets.RAILWAY_STAGING_SERVICE_ID }}
@@ -70,7 +70,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for name in RAILWAY_API_TOKEN RAILWAY_PROJECT_ID RAILWAY_STAGING_ENVIRONMENT_ID RAILWAY_STAGING_SERVICE_ID RAILWAY_STAGING_HEALTHCHECK_URL; do
+          for name in RAILWAY_TOKEN RAILWAY_PROJECT_ID RAILWAY_STAGING_ENVIRONMENT_ID RAILWAY_STAGING_SERVICE_ID RAILWAY_STAGING_HEALTHCHECK_URL; do
             if [ -z "${!name:-}" ]; then
               echo "::error::Missing required GitHub staging environment secret/variable: $name"
               exit 1
