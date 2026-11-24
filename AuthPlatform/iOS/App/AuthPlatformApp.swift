@@ -223,7 +223,7 @@ private struct AuthenticationDemoView: View {
             }
 
             let credentialID = credential.credentialID.base64URLEncodedString()
-            let userHandle = credential.userID.isEmpty ? nil : credential.userID.base64URLEncodedString()
+            let userHandle = credential.userID?.isEmpty == false ? credential.userID?.base64URLEncodedString() : nil
             let payload = PasskeyAuthenticationCredentialPayload(
                 id: credentialID,
                 rawId: credentialID,
