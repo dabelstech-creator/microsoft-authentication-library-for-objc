@@ -2,10 +2,11 @@ import AuthenticationServices
 import Foundation
 import Security
 
-public struct StoredPasswordCredential: Codable, Equatable, Sendable {
+public struct StoredPasswordCredential: Codable, Equatable, Identifiable, Sendable {
     public let service: String
     public let username: String
     public let password: String
+    public var id: String { service + "|" + username.lowercased() }
 
     public init(service: String, username: String, password: String) {
         self.service = service.lowercased()
