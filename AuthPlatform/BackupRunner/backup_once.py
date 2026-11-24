@@ -16,6 +16,7 @@ import sys
 import tempfile
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from pathlib import Path
 
@@ -100,10 +101,26 @@ def main():
         plain = Path(tmp) / "production.dump"
         encrypted = Path(tmp) / final_name
 
-        # pg_dump reads from DATABASE_URL; credentials are never echoed.
+        # Parse DATABASE_URL into libpq environment variables so the secret URI
+        # itself is not exposed in the pg_dump process argument list.
+        parsed = urllib.parse.urlparse(database_url)
+        if parsed.scheme not in ("postgres", "postgresql") or not parsed.hostname:
+            raise RuntimeError("DATABASE_URL must be a valid PostgreSQL URL")
+        query = urllib.parse.parse_qs(parsed.query)
+        pg_env = os.environ.copy()
+        pg_env.update({
+            "PGHOST": parsed.hostname,
+            "PGPORT": str(parsed.port or 5432),
+            "PGDATABASE": urllib.parse.unquote(parsed.path.lstrip("/")),
+            "PGUSER": urllib.parse.unquote(parsed.username or ""),
+            "PGPASSWORD": urllib.parse.unquote(parsed.password or ""),
+        })
+        if query.get("sslmode"):
+            pg_env["PGSSLMODE"] = query["sslmode"][0]
         subprocess.run(["pg_dump", "--format=custom", "--no-owner", "--no-acl",
-                        "--file", str(plain), database_url],
-                       check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+                        "--file", str(plain)],
+                       env=pg_env, check=True, stdout=subprocess.DEVNULL,
+                       stderr=subprocess.PIPE)
 
         if not plain.is_file() or plain.stat().st_size == 0:
             raise RuntimeError("pg_dump produced an empty archive")
