@@ -17,7 +17,6 @@ import tempfile
 import time
 import urllib.error
 import urllib.request
-from datetime import datetime, timezone
 from pathlib import Path
 
 DROPBOX_DEST = os.environ.get("DROPBOX_DEST", "/AuthPlatform Backups").rstrip("/")
@@ -92,8 +91,9 @@ def main():
     if not DROPBOX_DEST.startswith("/"):
         raise RuntimeError("DROPBOX_DEST must be an absolute Dropbox path")
 
-    stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    final_name = f"authplatform-production-{stamp}.dump.gpg"
+    final_name = os.environ.get("BACKUP_FILENAME", "authplatform-production-one-time.dump.gpg")
+    if "/" in final_name or "\\" in final_name or not final_name.endswith(".dump.gpg"):
+        raise RuntimeError("BACKUP_FILENAME must be a simple .dump.gpg filename")
     remote_path = f"{DROPBOX_DEST}/{final_name}"
 
     with tempfile.TemporaryDirectory(prefix="authplatform-backup-") as tmp:
