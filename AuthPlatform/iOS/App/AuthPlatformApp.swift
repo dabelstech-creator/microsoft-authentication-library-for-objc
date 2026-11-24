@@ -246,10 +246,12 @@ private struct AuthenticationDemoView: View {
                 relyingPartyIdentifier: options.publicKey.rpId
             )
             let request = provider.createCredentialAssertionRequest(challenge: challenge)
-            request.allowedCredentials = try options.publicKey.allowCredentials.map { descriptor in
-                ASAuthorizationPlatformPublicKeyCredentialDescriptor(
-                    credentialID: try decodePasskeyBase64URL(descriptor.id)
-                )
+            if let allowedCredentials = options.publicKey.allowCredentials {
+                request.allowedCredentials = try allowedCredentials.map { descriptor in
+                    ASAuthorizationPlatformPublicKeyCredentialDescriptor(
+                        credentialID: try decodePasskeyBase64URL(descriptor.id)
+                    )
+                }
             }
             request.userVerificationPreference = .required
 
