@@ -34,7 +34,7 @@ private struct AuthenticationDemoView: View {
     @State private var recoveryCodeInput = ""
     @State private var showRecoveryImporter = false
     @State private var showRecoveryExporter = false
-    @State private var recoveryAcknowledged = false
+    @AppStorage("authplatform.vaultRecoveryAcknowledged") private var recoveryAcknowledged = false
 
     private var savedCredentials: [StoredPasswordCredential] {
         (try? SharedCredentialVault.allCredentials()) ?? []
@@ -129,7 +129,7 @@ private struct AuthenticationDemoView: View {
                             Button("Synchronize encrypted vault") {
                                 Task { await synchronizeEncryptedVault() }
                             }
-                            .disabled(isBusy || currentAccessToken.isEmpty || (!recoveryCode.isEmpty && !recoveryAcknowledged))
+                            .disabled(isBusy || currentAccessToken.isEmpty || !recoveryAcknowledged)
                         } else {
                             Text("Create a vault key before enabling encrypted cloud synchronization. The server will receive ciphertext only.")
                                 .font(.footnote)
@@ -153,7 +153,9 @@ private struct AuthenticationDemoView: View {
                                     Label("Export recovery package as JSON", systemImage: "square.and.arrow.up")
                                 }
                             }
-                            Toggle("I saved the recovery code and exported the recovery package", isOn: $recoveryAcknowledged)
+                        }
+                        if !recoveryAcknowledged {
+                            Toggle("I have securely stored the recovery code and JSON recovery package", isOn: $recoveryAcknowledged)
                         }
                     }
 
@@ -233,7 +235,8 @@ private struct AuthenticationDemoView: View {
             let package = try JSONDecoder().decode(VaultCryptography.RecoveryPackage.self, from: data)
             try VaultCryptography.restoreVaultKey(recoveryCode: recoveryCodeInput, package: package)
             recoveryCodeInput = ""
-            status = "Vault key restored securely. Sign in, then synchronize to retrieve encrypted vault items."
+            recoveryAcknowledged = false
+            status = "Vault key restored securely. Confirm that you have safely stored the recovery code and package before synchronizing."
         } catch {
             status = "Vault recovery failed: \(error.localizedDescription)"
         }
