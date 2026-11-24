@@ -66,21 +66,6 @@ public enum SharedCredentialVault {
         return legacy
     }
 
-    public static func credentials(for service: String) throws -> [StoredPasswordCredential] {
-        let normalizedService = service.lowercased()
-        var values = try encryptedItems(for: normalizedService).map {
-            try VaultCryptography.open($0, as: StoredPasswordCredential.self)
-        }
-
-        // Migrate legacy records for this requested domain before returning credentials.
-        for legacy in try readLegacyCredentials(for: normalizedService) {
-            _ = try saveEncrypted(legacy)
-            try deleteLegacyCredential(service: legacy.service, username: legacy.username)
-            values.append(legacy)
-        }
-        return values
-    }
-
     public static func delete(service: String, username: String) throws {
         let status = SecItemDelete(query(account: accountKey(service: service, username: username)) as CFDictionary)
         guard status == errSecSuccess || status == errSecItemNotFound else { throw VaultError.keychain(status) }
@@ -166,12 +151,6 @@ public enum SharedCredentialVault {
         guard expectedService == nil || expectedService == domain else { return nil }
         let username = (attributes[kSecAttrLabel as String] as? String) ?? components[1]
         return StoredCredentialIdentity(service: domain, username: username)
-    }
-
-    public static func allCredentials() throws -> [StoredPasswordCredential] {
-        try encryptedItems().map {
-            try VaultCryptography.open($0, as: StoredPasswordCredential.self)
-        }
     }
 
     /// Rebuild the system's local identity index from the unlocked local vault.
