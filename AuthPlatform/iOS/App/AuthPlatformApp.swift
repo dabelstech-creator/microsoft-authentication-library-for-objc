@@ -274,6 +274,7 @@ private struct AuthenticationDemoView: View {
     }
 
     private func saveCredential() async {
+        var savedLocally = false
         guard VaultCryptography.hasVaultKey() else {
             status = "Create and export a recovery kit before saving credentials."
             return
@@ -283,6 +284,7 @@ private struct AuthenticationDemoView: View {
         do {
             let credential = StoredPasswordCredential(service: service, username: username, password: password)
             let envelope = try SharedCredentialVault.saveEncrypted(credential)
+            savedLocally = true
             SharedCredentialVault.refreshSystemCredentialIdentities { _ in }
             guard !currentAccessToken.isEmpty else {
                 status = "Credential encrypted and saved on this iPhone. Sign in again to synchronize it."
