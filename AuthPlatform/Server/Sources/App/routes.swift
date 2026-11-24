@@ -995,8 +995,8 @@ func routes(_ app: Application) throws {
         let user = try await authenticatedUser(for: request)
         guard let userID = user.id else { throw Abort(.internalServerError) }
 
-        let limit = try request.query.get(Int.self, at: "limit") ?? 100
-        let offset = try request.query.get(Int.self, at: "offset") ?? 0
+        let limit = try request.query.get(Int?.self, at: "limit") ?? 100
+        let offset = try request.query.get(Int?.self, at: "offset") ?? 0
         guard (1...200).contains(limit), offset >= 0 else {
             throw Abort(.badRequest, reason: "Vault pagination requires limit 1...200 and a non-negative offset.")
         }
@@ -1004,7 +1004,7 @@ func routes(_ app: Application) throws {
         let formatter = ISO8601DateFormatter()
         formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
         let snapshot: Date
-        if let rawSnapshot = try request.query.get(String.self, at: "snapshot") {
+        if let rawSnapshot = try request.query.get(String?.self, at: "snapshot") {
             guard let parsed = formatter.date(from: rawSnapshot) else {
                 throw Abort(.badRequest, reason: "Vault snapshot cursor is invalid.")
             }
