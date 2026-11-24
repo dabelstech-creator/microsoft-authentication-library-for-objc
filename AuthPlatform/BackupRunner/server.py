@@ -8,9 +8,6 @@ import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 TOKEN = os.environ.get("BACKUP_TRIGGER_TOKEN", "")
-if len(TOKEN) < 32:
-    raise SystemExit("BACKUP_TRIGGER_TOKEN must be configured with at least 32 characters")
-
 state = {"status": "idle", "result": None}
 lock = threading.Lock()
 
@@ -63,6 +60,9 @@ class Handler(BaseHTTPRequestHandler):
     def do_POST(self):
         if self.path != "/run":
             self.send_json(404, {"error": "not_found"})
+            return
+        if len(TOKEN) < 32:
+            self.send_json(503, {"error": "backup_trigger_not_configured"})
             return
         supplied = self.headers.get("Authorization", "")
         expected = "Bearer " + TOKEN
