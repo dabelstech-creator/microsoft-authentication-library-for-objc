@@ -208,7 +208,7 @@ final class EncryptedVaultAPITests: XCTestCase {
         try await app.autoMigrate()
 
         let user = User()
-        user.emailNormalized = "vault-pages-\\(UUID().uuidString.lowercased())@example.test"
+        user.emailNormalized = "vault-pages-\(UUID().uuidString.lowercased())@example.test"
         user.emailVerifiedAt = Date()
         user.passwordHash = "unused-by-vault-test"
         try await user.save(on: app.db)
@@ -226,7 +226,7 @@ final class EncryptedVaultAPITests: XCTestCase {
         for index in 0..<2 {
             let payload = EncryptedVaultItemPayload(
                 clientItemID: UUID(),
-                ciphertext: Data("ciphertext-\\(index)".utf8).base64EncodedString(),
+                ciphertext: Data("ciphertext-\(index)".utf8).base64EncodedString(),
                 nonce: Data(repeating: UInt8(index + 1), count: 12).base64EncodedString(),
                 authenticationTag: Data(repeating: UInt8(index + 2), count: 16).base64EncodedString(),
                 formatVersion: 1
@@ -247,7 +247,7 @@ final class EncryptedVaultAPITests: XCTestCase {
             do {
                 firstPage = try response.content.decode(EncryptedVaultItemPage.self)
             } catch {
-                XCTFail("Could not decode first vault page: \\(error)")
+                XCTFail("Could not decode first vault page: \(error)")
             }
         })
         let first = try XCTUnwrap(firstPage)
@@ -255,14 +255,14 @@ final class EncryptedVaultAPITests: XCTestCase {
         XCTAssertEqual(first.nextOffset, 1)
 
         var secondPage: EncryptedVaultItemPage?
-        try await app.test(.GET, "v1/vault/items?limit=1&offset=1&snapshot=\\(first.snapshot)", beforeRequest: { request in
+        try await app.test(.GET, "v1/vault/items?limit=1&offset=1&snapshot=\(first.snapshot)", beforeRequest: { request in
             request.headers.bearerAuthorization = BearerAuthorization(token: token)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
             do {
                 secondPage = try response.content.decode(EncryptedVaultItemPage.self)
             } catch {
-                XCTFail("Could not decode second vault page: \\(error)")
+                XCTFail("Could not decode second vault page: \(error)")
             }
         })
         let second = try XCTUnwrap(secondPage)
