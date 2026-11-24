@@ -1,19 +1,34 @@
 # AuthPlatform one-time encrypted backup runner
 
-This is a manually invoked Render Cron Job image, not an automatically scheduled backup.
+This is a free Render Web Service with a single authenticated trigger. It is not a scheduled job; the trigger is accepted only once per container lifetime.
 
 ## Required Render runtime secrets
 
-Set these directly in the Render Cron Job environment settings. Never commit them or paste them into chat.
+Set these directly in the Render Web Service environment settings. Never commit them or paste them into chat.
 
-- `DATABASE_URL`: the PostgreSQL **Internal Database URL** for `sign-trigger-passkeys`.
-- `DROPBOX_ACCESS_TOKEN`: a short-lived Dropbox OAuth access token restricted to the app folder and the minimum scopes `files.content.write` and `files.metadata.read`. Do not grant sharing scopes.
-- `BACKUP_ENCRYPTION_PASSPHRASE`: a randomly generated, unique passphrase of at least 24 characters. Store it separately (for example, in a password manager); it is required for decryption.
+- `DATABASE_URL`: PostgreSQL **Internal Database URL** for `sign-trigger-passkeys`.
+- `DROPBOX_ACCESS_TOKEN`: short-lived Dropbox OAuth token with only `files.content.write` and `files.metadata.read` scopes. Do not grant sharing scopes.
+- `BACKUP_ENCRYPTION_PASSPHRASE`: unique random passphrase of at least 24 characters; store separately from the backup.
+- `BACKUP_TRIGGER_TOKEN`: separate random bearer token of at least 32 characters; store in a password manager.
 - Optional `DROPBOX_DEST`: defaults to `/AuthPlatform Backups`.
+- Optional `BACKUP_FILENAME`: defaults to `authplatform-production-one-time.dump.gpg`.
 
-## Execution
+Use the Free plan in Oregon, matching the database. No database credentials or tokens belong in GitHub.
 
-Build the image from the repository root using this Dockerfile, in Oregon. Configure a deliberately distant cron schedule only to satisfy Render's cron service requirement; **do not wait for that schedule**. Use Render Dashboard > Cron Job > Run Now for the one-time execution, then immediately suspend/delete the cron service after the run. Do not configure AutoDeploy for the job.
+## Dropbox app setup
+
+The staging folder was created at the Dropbox account root (`/AuthPlatform Backups`). Configure the Dropbox app for Full Dropbox access, but grant only `files.content.write` and `files.metadata.read` OAuth scopes. Do not grant sharing scopes. Generate a short-lived token for the one-time run and revoke it after upload.
+
+## One-time execution
+
+1. Configure all secrets above in the Render service Environment page.
+2. Deploy and wait for `/health` to return ready.
+3. Send one HTTPS POST to `/run` with header `Authorization: Bearer <BACKUP_TRIGGER_TOKEN>`. Never put the token in a URL or chat.
+4. Poll `/status` until it reports `succeeded` or `failed`.
+5. Download the encrypted `.gpg` file from Dropbox to the iPhone and move it into `iCloud Drive/AuthPlatform Backups/`.
+6. Revoke the Dropbox token, remove the trigger token and passphrase from Render, then suspend or delete the runner service.
+
+The fixed Dropbox filename uses add-only upload with strict conflict handling to prevent a second successful upload under a different filename.
 
 ## Safety properties
 
@@ -21,20 +36,14 @@ Build the image from the repository root using this Dockerfile, in Oregon. Confi
 - Custom-format archive is inspected with `pg_restore --list` before encryption.
 - GPG symmetric AES-256 encryption occurs before any network upload.
 - Dropbox upload uses the content API only; no shared link is created.
-- Plaintext is kept in an ephemeral container directory and removed when the process exits.
-- The job emits only destination, byte count, and SHA-256 metadata. It suppresses subprocess stderr to avoid leaking connection details.
-- A successful upload and archive listing are **not** a restore test. Restore validation must occur against an isolated, disposable PostgreSQL instance, never production.
-
-## Dropbox app setup
-
-Because the staging folder was created at the Dropbox account root (`/AuthPlatform Backups`), configure the Dropbox app for **Full Dropbox** access, but grant only the `files.content.write` and `files.metadata.read` OAuth scopes. Do not grant sharing scopes. If you prefer App Folder access, create a separate folder inside that app's `/` namespace and change `DROPBOX_DEST` to that app-folder-relative path. Generate a short-lived token for the one-time run and revoke it after upload.
+- Plaintext is held in an ephemeral container directory and removed when the process exits.
+- The service does not log request headers, tokens, passphrases, database URLs, or subprocess stderr.
+- A successful upload and archive listing are not a restore test. Restore validation must occur against an isolated, disposable PostgreSQL instance, never production.
 
 ## Decryption
 
-Download the `.dump.gpg` file to a trusted machine and decrypt locally:
-
 ```sh
-gpg --output authplatform-production.dump --decrypt authplatform-production-*.dump.gpg
+gpg --output authplatform-production.dump --decrypt authplatform-production-one-time.dump.gpg
 pg_restore --list authplatform-production.dump
 ```
 
