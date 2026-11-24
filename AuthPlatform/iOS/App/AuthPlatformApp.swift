@@ -12,6 +12,15 @@ struct AuthPlatformApp: App {
     }
 }
 
+private struct VaultSyncConflict: Identifiable {
+    var id: UUID { localEnvelope.clientItemID }
+    let localEnvelope: EncryptedVaultItemEnvelope
+    let remoteEnvelope: EncryptedVaultItemEnvelope
+    let remoteVersion: Int
+    let service: String
+    let username: String
+}
+
 @MainActor
 private struct AuthenticationDemoView: View {
     @State private var username = ""
@@ -27,6 +36,7 @@ private struct AuthenticationDemoView: View {
     @State private var recoveryPackageJSON = ""
     @State private var recoveryImportCode = ""
     @State private var recoveryImportJSON = ""
+    @State private var syncConflicts: [VaultSyncConflict] = []
 
     private var service: String {
         Bundle.main.object(forInfoDictionaryKey: "AUTH_CREDENTIAL_SERVICE") as? String ?? "auth.moredesa.com"
@@ -104,6 +114,30 @@ private struct AuthenticationDemoView: View {
                             Label("Synchronize encrypted vault", systemImage: "arrow.triangle.2.circlepath")
                         }
                         .disabled(isBusy || !VaultCryptography.hasVaultKey())
+                    }
+
+                    if !syncConflicts.isEmpty {
+                        Section("Resolve synchronization conflicts") {
+                            ForEach(syncConflicts) { conflict in
+                                VStack(alignment: .leading, spacing: 8) {
+                                    Text(conflict.username)
+                                        .font(.headline)
+                                    Text(conflict.service)
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                    Text("Cloud version \(conflict.remoteVersion). Choose which encrypted copy to keep.")
+                                        .font(.footnote)
+                                    HStack {
+                                        Button("Keep this iPhone") {
+                                            Task { await resolveSyncConflict(conflict, keepLocal: true) }
+                                        }
+                                        Button("Use cloud copy") {
+                                            Task { await resolveSyncConflict(conflict, keepLocal: false) }
+                                        }
+                                    }
+                                }
+                            }
+                        }
                     }
 
                     Section("Restore vault on this device") {
@@ -549,7 +583,7 @@ private struct AuthenticationDemoView: View {
             var local = try SharedCredentialVault.encryptedItems()
             let localByID = Dictionary(uniqueKeysWithValues: local.map { ($0.clientItemID, $0) })
             let remoteIDs = Set(remote.map(\.clientItemID))
-            var conflicts = 0
+            var conflicts: [VaultSyncConflict] = []
 
             for record in remote {
                 if record.isDeleted {
@@ -564,7 +598,19 @@ private struct AuthenticationDemoView: View {
                     formatVersion: record.formatVersion
                 )
                 if let localEnvelope = localByID[record.clientItemID] {
-                    if localEnvelope != envelope { conflicts += 1 }
+                    if localEnvelope != envelope {
+                        let localCredential = try VaultCryptography.open(localEnvelope, as: StoredPasswordCredential.self)
+                        let remoteCredential = try VaultCryptography.open(envelope, as: StoredPasswordCredential.self)
+                        conflicts.append(VaultSyncConflict(
+                            localEnvelope: localEnvelope,
+                            remoteEnvelope: envelope,
+                            remoteVersion: record.version,
+                            service: remoteCredential.service,
+                            username: localCredential.username == remoteCredential.username
+                                ? remoteCredential.username
+                                : "\(localCredential.username) / \(remoteCredential.username)"
+                        ))
+                    }
                 } else {
                     try SharedCredentialVault.importEncryptedItem(envelope)
                 }
@@ -575,13 +621,40 @@ private struct AuthenticationDemoView: View {
                 _ = try await api.saveVaultItem(envelope, accessToken: currentAccessToken)
             }
 
-            if conflicts > 0 {
-                status = "Synchronization completed with \(conflicts) unresolved item conflict(s). Neither copy was overwritten. Version-aware conflict resolution is still required."
+            syncConflicts = conflicts
+            SharedCredentialVault.refreshSystemCredentialIdentities { _ in }
+            if !conflicts.isEmpty {
+                status = "Synchronization found \(conflicts.count) conflict(s). Choose whether to keep the local or cloud copy for each item."
             } else {
                 status = "Encrypted vault synchronization completed. Remote tombstones were applied."
             }
         } catch {
             status = "Vault synchronization failed safely: \(error.localizedDescription)"
+        }
+    }
+
+    private func resolveSyncConflict(_ conflict: VaultSyncConflict, keepLocal: Bool) async {
+        isBusy = true
+        defer { isBusy = false }
+        do {
+            if keepLocal {
+                let api = try AuthPlatformAPI()
+                _ = try await api.saveVaultItem(
+                    conflict.localEnvelope,
+                    expectedVersion: conflict.remoteVersion,
+                    accessToken: currentAccessToken
+                )
+            } else {
+                try SharedCredentialVault.delete(clientItemID: conflict.localEnvelope.clientItemID)
+                try SharedCredentialVault.importEncryptedItem(conflict.remoteEnvelope)
+            }
+            syncConflicts.removeAll { $0.id == conflict.id }
+            SharedCredentialVault.refreshSystemCredentialIdentities { _ in }
+            status = keepLocal
+                ? "The local encrypted copy is now the server's current version."
+                : "The cloud encrypted copy replaced the local copy on this iPhone."
+        } catch {
+            status = "Conflict resolution failed safely: \(error.localizedDescription)"
         }
     }
 
