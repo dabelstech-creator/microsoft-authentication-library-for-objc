@@ -139,7 +139,11 @@ def main():
 
         if not encrypted.is_file() or encrypted.stat().st_size == 0:
             raise RuntimeError("Encryption did not produce an archive")
-        hasher = hashlib.sha256()\n        with encrypted.open("rb") as encrypted_stream:\n            for block in iter(lambda: encrypted_stream.read(1024 * 1024), b""):\n                hasher.update(block)\n        digest = hasher.hexdigest()
+        hasher = hashlib.sha256()
+        with encrypted.open("rb") as encrypted_stream:
+            for block in iter(lambda: encrypted_stream.read(1024 * 1024), b""):
+                hasher.update(block)
+        digest = hasher.hexdigest()
         metadata = dropbox_upload(remote_path, token, encrypted)
 
         if metadata.get("path_lower", "").lower() != remote_path.lower():
