@@ -104,6 +104,46 @@ final class AuthPlatformAPI {
     }
 
 
+    func register(email: String, password: String) async throws -> RegistrationResponse {
+        var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent("auth").appendingPathComponent("register"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(LoginRequest(email: email, password: password))
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+        return try JSONDecoder().decode(RegistrationResponse.self, from: data)
+    }
+
+    func requestEmailVerification(email: String) async throws {
+        try await postMessage(path: ["v1", "auth", "verification", "request"], body: EmailRequest(email: email))
+    }
+
+    func verifyEmail(token: String) async throws {
+        try await postMessage(path: ["v1", "auth", "verify-email"], body: TokenRequest(token: token))
+    }
+
+    func requestPasswordReset(email: String) async throws {
+        try await postMessage(path: ["v1", "auth", "password", "forgot"], body: EmailRequest(email: email))
+    }
+
+    func resetPassword(token: String, newPassword: String) async throws {
+        try await postMessage(
+            path: ["v1", "auth", "password", "reset"],
+            body: PasswordResetRequest(token: token, newPassword: newPassword)
+        )
+    }
+
+    private func postMessage<Body: Encodable>(path: [String], body: Body) async throws {
+        var url = baseURL
+        for component in path { url.appendPathComponent(component) }
+        var request = URLRequest(url: url)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = try JSONEncoder().encode(body)
+        let (data, response) = try await session.data(for: request)
+        try Self.validate(response: response, data: data)
+    }
+
     func logout(refreshToken: String) async throws {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent("auth").appendingPathComponent("logout"))
         request.httpMethod = "POST"
@@ -227,6 +267,24 @@ final class AuthPlatformAPI {
             throw AuthPlatformAPIError.rejected(http.statusCode, message)
         }
     }
+}
+
+private struct RegistrationResponse: Decodable {
+    let userID: UUID
+    let emailVerificationRequired: Bool
+}
+
+private struct EmailRequest: Encodable {
+    let email: String
+}
+
+private struct TokenRequest: Encodable {
+    let token: String
+}
+
+private struct PasswordResetRequest: Encodable {
+    let token: String
+    let newPassword: String
 }
 
 private struct LoginRequest: Encodable {
