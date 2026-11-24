@@ -77,7 +77,6 @@ public enum SharedCredentialVault {
     public static func allCredentials() throws -> [StoredPasswordCredential] {
         var attributes: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: keychainService,
             kSecAttrSynchronizable as String: false,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitAll
@@ -87,7 +86,9 @@ public enum SharedCredentialVault {
         let status = SecItemCopyMatching(attributes as CFDictionary, &result)
         if status == errSecItemNotFound { return [] }
         guard status == errSecSuccess, let values = result as? [Data] else { throw VaultError.keychain(status) }
-        return try values.map { try JSONDecoder().decode(StoredPasswordCredential.self, from: $0) }
+        // The shared access group also contains the AuthPlatform session and vault key.
+        // Decode only records matching the credential schema; never expose unrelated Keychain data.
+        return values.compactMap { try? JSONDecoder().decode(StoredPasswordCredential.self, from: $0) }
     }
 
     /// Rebuild the system's local identity index from the unlocked local vault.
