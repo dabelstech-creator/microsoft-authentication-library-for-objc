@@ -418,7 +418,7 @@ final class AuthPlatformAPI {
 private struct EmptyRequest: Encodable {}
 private struct EmptyResponse: Decodable {}
 
-private extension Data {
+extension Data {
     func base64URLEncodedString() -> String {
         base64EncodedString()
             .replacingOccurrences(of: "+", with: "-")
