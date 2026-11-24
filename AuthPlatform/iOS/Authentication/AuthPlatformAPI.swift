@@ -23,10 +23,22 @@ struct EncryptedVaultItemRecord: Decodable, Sendable {
     let authenticationTag: String
     let formatVersion: Int
     let version: Int
-    let createdAt: Date?
-    let updatedAt: Date?
-    let deletedAt: Date?
     let isDeleted: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case clientItemID, ciphertext, nonce, authenticationTag, formatVersion, version, isDeleted
+    }
+
+    init(from decoder: Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        clientItemID = try values.decode(UUID.self, forKey: .clientItemID)
+        ciphertext = try values.decode(String.self, forKey: .ciphertext)
+        nonce = try values.decode(String.self, forKey: .nonce)
+        authenticationTag = try values.decode(String.self, forKey: .authenticationTag)
+        formatVersion = try values.decode(Int.self, forKey: .formatVersion)
+        version = try values.decodeIfPresent(Int.self, forKey: .version) ?? 1
+        isDeleted = try values.decode(Bool.self, forKey: .isDeleted)
+    }
 }
 
 private struct EncryptedVaultItemPage: Decodable {
@@ -130,12 +142,19 @@ final class AuthPlatformAPI {
             request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
             let (data, response) = try await session.data(for: request)
             try Self.validate(response: response, data: data)
-            let page = try JSONDecoder().decode(EncryptedVaultItemPage.self, from: data)
-            result.append(contentsOf: page.items)
-            guard let nextOffset = page.nextOffset else { break }
-            guard nextOffset > offset else { throw AuthPlatformAPIError.invalidResponse }
-            offset = nextOffset
-            snapshot = page.snapshot
+            if let page = try? JSONDecoder().decode(EncryptedVaultItemPage.self, from: data) {
+                result.append(contentsOf: page.items)
+                guard let nextOffset = page.nextOffset else { break }
+                guard nextOffset > offset else { throw AuthPlatformAPIError.invalidResponse }
+                offset = nextOffset
+                snapshot = page.snapshot
+            } else if offset == 0 {
+                // Backward-compatible read path for servers before versioned pagination.
+                result.append(contentsOf: try JSONDecoder().decode([EncryptedVaultItemRecord].self, from: data))
+                break
+            } else {
+                throw AuthPlatformAPIError.invalidResponse
+            }
         }
         return result
     }
