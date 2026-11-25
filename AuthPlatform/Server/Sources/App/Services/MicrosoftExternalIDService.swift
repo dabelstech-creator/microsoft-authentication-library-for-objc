@@ -17,11 +17,8 @@ private struct MicrosoftExternalIDAccessToken: JWTPayload {
     let issuedAt: IssuedAtClaim
     let notBefore: NotBeforeClaim?
     let tenantID: String
+    let objectID: String?
     let scopes: String?
-    let email: String?
-    let preferredUsername: String?
-    let name: String?
-    let emailVerified: Bool?
 
     enum CodingKeys: String, CodingKey {
         case issuer = "iss"
@@ -31,11 +28,8 @@ private struct MicrosoftExternalIDAccessToken: JWTPayload {
         case issuedAt = "iat"
         case notBefore = "nbf"
         case tenantID = "tid"
+        case objectID = "oid"
         case scopes = "scp"
-        case email
-        case preferredUsername = "preferred_username"
-        case name
-        case emailVerified = "email_verified"
     }
 
     func verify(using _: some JWTAlgorithm) async throws {
@@ -47,23 +41,71 @@ private struct MicrosoftExternalIDAccessToken: JWTPayload {
         else {
             throw JWTError.claimVerificationFailure(
                 failedClaim: subject,
-                reason: "Microsoft External ID token is missing a valid subject, tenant, or issued-at time."
+                reason: "Microsoft External ID access token is missing a valid subject, tenant, or issued-at time."
             )
         }
     }
 }
 
-/// Validates a delegated External ID access token for the AuthPlatform API.
-/// No client secret is used: the iOS application is a public client.
-func verifyMicrosoftExternalIDAccessToken(
-    _ token: String,
+private struct MicrosoftExternalIDIdentityToken: JWTPayload {
+    let issuer: IssuerClaim
+    let subject: SubjectClaim
+    let audience: AudienceClaim
+    let expiration: ExpirationClaim
+    let issuedAt: IssuedAtClaim
+    let notBefore: NotBeforeClaim?
+    let tenantID: String
+    let objectID: String?
+    let email: String?
+    let emailVerified: Bool?
+    let name: String?
+
+    enum CodingKeys: String, CodingKey {
+        case issuer = "iss"
+        case subject = "sub"
+        case audience = "aud"
+        case expiration = "exp"
+        case issuedAt = "iat"
+        case notBefore = "nbf"
+        case tenantID = "tid"
+        case objectID = "oid"
+        case email
+        case emailVerified = "email_verified"
+        case name
+    }
+
+    func verify(using _: some JWTAlgorithm) async throws {
+        try expiration.verifyNotExpired()
+        try notBefore?.verifyNotBefore(currentDate: Date().addingTimeInterval(-60))
+        guard issuedAt.value <= Date().addingTimeInterval(60),
+              !subject.value.isEmpty,
+              UUID(uuidString: tenantID) != nil
+        else {
+            throw JWTError.claimVerificationFailure(
+                failedClaim: subject,
+                reason: "Microsoft External ID ID token is missing a valid subject, tenant, or issued-at time."
+            )
+        }
+    }
+}
+
+/// Validates both tokens issued by one External ID device-code authorization:
+/// API access token: API audience + delegated scope.
+/// ID token: iOS client audience + verified email.
+/// The stable oid claim must match between them before a local session is issued.
+func verifyMicrosoftExternalIDTokens(
+    accessToken: String,
+    idToken: String,
     on request: Request
 ) async throws -> VerifiedMicrosoftExternalIDIdentity {
-    guard token.count <= 32_768,
+    guard accessToken.count <= 32_768,
+          idToken.count <= 32_768,
           let tenantSubdomain = Environment.get("MICROSOFT_TENANT_SUBDOMAIN"),
           tenantSubdomain.range(of: #"^[A-Za-z0-9-]+$"#, options: .regularExpression) != nil,
           let tenantID = Environment.get("MICROSOFT_TENANT_ID"),
           UUID(uuidString: tenantID) != nil,
+          let clientID = Environment.get("MICROSOFT_CLIENT_ID"),
+          UUID(uuidString: clientID) != nil,
           let expectedAudience = Environment.get("MICROSOFT_API_AUDIENCE"),
           !expectedAudience.isEmpty
     else {
@@ -100,23 +142,31 @@ func verifyMicrosoftExternalIDAccessToken(
 
     let jwks = try jwksResponse.content.decode(JWKS.self)
     let keys = try await JWTKeyCollection().add(jwks: jwks)
-    let claims = try await keys.verify(token, as: MicrosoftExternalIDAccessToken.self)
+    let apiClaims = try await keys.verify(accessToken, as: MicrosoftExternalIDAccessToken.self)
+    let identityClaims = try await keys.verify(idToken, as: MicrosoftExternalIDIdentityToken.self)
 
-    guard claims.issuer.value == expectedIssuer,
-          claims.tenantID.lowercased() == tenantID.lowercased(),
-          claims.audience.value.contains(expectedAudience),
-          claims.scopes?.split(whereSeparator: \.isWhitespace).contains(Substring(requiredScope)) == true,
-          claims.emailVerified == true,
-          let rawEmail = claims.email ?? claims.preferredUsername,
+    guard apiClaims.issuer.value == expectedIssuer,
+          identityClaims.issuer.value == expectedIssuer,
+          apiClaims.tenantID.lowercased() == tenantID.lowercased(),
+          identityClaims.tenantID.lowercased() == tenantID.lowercased(),
+          apiClaims.audience.value.contains(expectedAudience),
+          identityClaims.audience.value.contains(clientID),
+          apiClaims.scopes?.split(whereSeparator: \.isWhitespace).contains(Substring(requiredScope)) == true,
+          let apiObjectID = apiClaims.objectID,
+          let identityObjectID = identityClaims.objectID,
+          !apiObjectID.isEmpty,
+          apiObjectID == identityObjectID,
+          identityClaims.emailVerified == true,
+          let rawEmail = identityClaims.email,
           let email = normalizedEmail(rawEmail)
     else {
-        throw Abort(.unauthorized, reason: "Microsoft External ID access token claims, API audience, delegated scope, or verified email are invalid.")
+        throw Abort(.unauthorized, reason: "Microsoft External ID tokens failed issuer, tenant, audience, scope, subject-binding, or verified-email validation.")
     }
 
     return VerifiedMicrosoftExternalIDIdentity(
-        issuer: claims.issuer.value,
-        subject: claims.subject.value,
+        issuer: identityClaims.issuer.value,
+        subject: identityClaims.subject.value,
         email: email,
-        displayName: claims.name
+        displayName: identityClaims.name
     )
 }
