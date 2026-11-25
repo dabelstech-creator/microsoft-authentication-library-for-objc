@@ -901,6 +901,62 @@ func routes(_ app: Application) throws {
         return try await issueSession(for: user, on: request)
     }
 
+    app.post("v1", "auth", "microsoft", "exchange") { request async throws -> AuthResponse in
+        guard let accessToken = bearerToken(from: request) else {
+            throw Abort(.unauthorized, reason: "A Microsoft External ID API access token is required.")
+        }
+        let identity = try await verifyMicrosoftExternalIDAccessToken(accessToken, on: request)
+
+        // Serialize first-login provisioning by the stable External ID issuer/subject pair.
+        // Never link an external identity to a local account solely because emails match.
+        let user = try await request.db.transaction { database -> User in
+            guard let sql = database as? SQLDatabase else {
+                throw Abort(.internalServerError, reason: "Microsoft identity mapping requires PostgreSQL.")
+            }
+            let lockKey = "microsoft-external-id:\(identity.issuer):\(identity.subject)"
+            _ = try await sql.raw("SELECT pg_advisory_xact_lock(hashtext(\(bind: lockKey)))").all()
+
+            if let account = try await OAuthAccount.query(on: database)
+                .filter(\.$provider == "microsoft-external-id")
+                .filter(\.$issuer == identity.issuer)
+                .filter(\.$subject == identity.subject)
+                .first(),
+               let existing = try await User.find(account.userID, on: database),
+               existing.disabledAt == nil,
+               existing.emailVerifiedAt != nil {
+                return existing
+            }
+
+            if try await User.query(on: database)
+                .filter(\.$emailNormalized == identity.email).first() != nil {
+                throw Abort(.conflict, reason: "An account already uses this email. Sign in to that account and explicitly link Microsoft first.")
+            }
+
+            let created = User()
+            created.emailNormalized = identity.email
+            created.emailVerifiedAt = Date()
+            try await created.save(on: database)
+            guard let createdID = created.id else { throw Abort(.internalServerError) }
+
+            let account = OAuthAccount()
+            account.userID = createdID
+            account.provider = "microsoft-external-id"
+            account.issuer = identity.issuer
+            account.subject = identity.subject
+            try await account.save(on: database)
+            return created
+        }
+
+        guard let userID = user.id else { throw Abort(.internalServerError) }
+        let event = AuditEvent()
+        event.actorUserID = userID
+        event.eventType = "auth.microsoft_external_id.login"
+        event.occurredAt = Date()
+        try await event.save(on: request.db)
+
+        return try await issueSession(for: user, on: request)
+    }
+
     app.post("v1", "auth", "workos", "link") { request async throws -> HTTPStatus in
         let localUser = try await authenticatedUser(for: request)
         guard let header = request.headers.first(name: "X-WorkOS-Authorization"),
