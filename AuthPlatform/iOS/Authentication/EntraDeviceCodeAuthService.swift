@@ -1,5 +1,10 @@
 import Foundation
 
+struct EntraDeviceTokens: Sendable {
+    let accessToken: String
+    let idToken: String
+}
+
 struct EntraDeviceCodePrompt: Sendable {
     let userCode: String
     let verificationURL: URL
@@ -27,6 +32,7 @@ private struct DeviceCodeStartResponse: Decodable {
 
 private struct DeviceCodeTokenResponse: Decodable {
     let accessToken: String?
+    let idToken: String?
     let tokenType: String?
     let scope: String?
     let expiresIn: Int?
@@ -35,6 +41,7 @@ private struct DeviceCodeTokenResponse: Decodable {
 
     enum CodingKeys: String, CodingKey {
         case accessToken = "access_token"
+        case idToken = "id_token"
         case tokenType = "token_type"
         case scope
         case expiresIn = "expires_in"
@@ -84,7 +91,7 @@ final class EntraDeviceCodeAuthService {
 
     func signIn(
         onDeviceCode: @MainActor (EntraDeviceCodePrompt) -> Void
-    ) async throws -> String {
+    ) async throws -> EntraDeviceTokens {
         let configuration = try Self.loadConfiguration()
         let start = try await requestDeviceCode(configuration: configuration)
         guard
@@ -115,11 +122,12 @@ final class EntraDeviceCodeAuthService {
                 deviceCode: start.deviceCode
             )
 
-            if let accessToken = response.accessToken, !accessToken.isEmpty {
+            if let accessToken = response.accessToken, !accessToken.isEmpty,
+               let idToken = response.idToken, !idToken.isEmpty {
                 guard response.tokenType?.lowercased() == "bearer" else {
                     throw EntraDeviceCodeError.invalidResponse
                 }
-                return accessToken
+                return EntraDeviceTokens(accessToken: accessToken, idToken: idToken)
             }
 
             switch response.error {
