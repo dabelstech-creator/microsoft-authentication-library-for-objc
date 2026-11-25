@@ -19,6 +19,7 @@ private struct MicrosoftExternalIDAccessToken: JWTPayload {
     let tenantID: String
     let objectID: String?
     let scopes: String?
+    let authorizedParty: String?
 
     enum CodingKeys: String, CodingKey {
         case issuer = "iss"
@@ -30,6 +31,7 @@ private struct MicrosoftExternalIDAccessToken: JWTPayload {
         case tenantID = "tid"
         case objectID = "oid"
         case scopes = "scp"
+        case authorizedParty = "azp"
     }
 
     func verify(using _: some JWTAlgorithm) async throws {
@@ -153,6 +155,7 @@ func verifyMicrosoftExternalIDTokens(
           apiClaims.tenantID.lowercased() == tenantID.lowercased(),
           identityClaims.tenantID.lowercased() == tenantID.lowercased(),
           apiClaims.audience.value.contains(expectedAudience),
+          apiClaims.authorizedParty == clientID,
           identityClaims.audience.value.contains(clientID),
           apiClaims.scopes?.split(whereSeparator: \.isWhitespace).contains(Substring(requiredScope)) == true,
           let apiObjectID = apiClaims.objectID,
