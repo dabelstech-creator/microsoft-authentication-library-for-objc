@@ -1,0 +1,56 @@
+name: AuthPlatform Telegram Serverless
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: authplatform-telegram-serverless
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy AuthPlatform Telegram bot
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: AuthPlatform/TelegramBot
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: AuthPlatform/TelegramBot/package-lock.json
+
+      - name: Verify deployment credential is configured
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: |
+          if [ -z "$TGCLOUD_TOKEN" ]; then
+            echo "::error::Add the Telegram Serverless CLI access token as the repository Actions secret TGCLOUD_TOKEN."
+            exit 1
+          fi
+
+      - name: Install Telegram Serverless CLI
+        run: npm install --no-audit --no-fund
+
+      - name: Inspect local deployment changes
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud status
+
+      - name: Deploy bot modules
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud push
+
+      - name: Synchronize Telegram webhook
+        env:
+          TGCLOUD_TOKEN: ${{ secrets.TGCLOUD_TOKEN }}
+        run: npx tgcloud webhook sync
