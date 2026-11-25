@@ -2,7 +2,7 @@ import Foundation
 import MSAL
 import UIKit
 
-/// Browser-delegated Entra External ID sign-in.
+/// Browser-delegated Entra External ID sign-in using the CIAM authority type.
 /// The identity provider owns password, email verification, MFA and recovery UX.
 @MainActor
 final class ExternalIDAuth {
@@ -20,7 +20,7 @@ final class ExternalIDAuth {
         }
 
         do {
-            let authority = try MSALAuthority(url: authorityURL)
+            let authority = try MSALCIAMAuthority(url: authorityURL)
             let config = MSALPublicClientApplicationConfig(
                 clientId: clientId,
                 redirectUri: nil, // MSAL derives msauth.<bundle-id>://auth
