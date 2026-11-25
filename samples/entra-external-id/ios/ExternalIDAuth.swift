@@ -20,7 +20,7 @@ final class ExternalIDAuth {
         }
 
         do {
-            let authority = try MSALCIAMAuthority(url: authorityURL)
+            let authority = try MSALAADAuthority(url: authorityURL)
             let config = MSALPublicClientApplicationConfig(
                 clientId: clientId,
                 redirectUri: nil, // MSAL derives msauth.<bundle-id>://auth
