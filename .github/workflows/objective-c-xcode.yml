@@ -35,3 +35,55 @@ jobs:
           swiftc -typecheck -sdk "$IOS_SDK" -target arm64-apple-ios17.0-simulator AuthPlatform/iOS/Authentication/PasskeyService.swift
       - name: Build and analyze shared iOS framework scheme
         run: xcodebuild -workspace MSAL.xcworkspace -scheme "MSAL (iOS Framework)" -destination "generic/platform=iOS Simulator" CODE_SIGNING_ALLOWED=NO clean build analyze
+      - name: Run MSAL iOS unit tests
+        run: |
+          set -euo pipefail
+          DEVICE_UDID="$(xcrun simctl list devices available -j | /usr/bin/python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          devices = [d for runtime, entries in data["devices"].items()
+                     if runtime.startswith("com.apple.CoreSimulator.SimRuntime.iOS-")
+                     for d in entries if d.get("isAvailable") and d["name"].startswith("iPhone")]
+          if not devices:
+              raise SystemExit("No available iPhone simulator runtime/device found")
+          print(devices[0]["udid"])
+          ')"
+          xcrun simctl boot "$DEVICE_UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_UDID" -b
+          xcodebuild -workspace MSAL.xcworkspace -scheme "MSAL (iOS Framework)" -destination "id=$DEVICE_UDID" CODE_SIGNING_ALLOWED=NO test
+
+      - name: Build, install, and launch Swift iOS sample
+        run: |
+          set -euo pipefail
+          PROJECT="Samples/ios/SampleAppiOS-Swift/SampleAppiOS-Swift.xcodeproj"
+          DERIVED_DATA="$RUNNER_TEMP/SampleAppDerivedData"
+          DEVICE_UDID="$(xcrun simctl list devices available -j | /usr/bin/python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          devices = [d for runtime, entries in data["devices"].items()
+                     if runtime.startswith("com.apple.CoreSimulator.SimRuntime.iOS-")
+                     for d in entries if d.get("isAvailable") and d["name"].startswith("iPhone")]
+          if not devices:
+              raise SystemExit("No available iPhone simulator runtime/device found")
+          print(devices[0]["udid"])
+          ')"
+          xcodebuild -project "$PROJECT" -scheme SampleAppiOS-Swift -sdk iphonesimulator -destination "id=$DEVICE_UDID" -derivedDataPath "$DERIVED_DATA" CODE_SIGNING_ALLOWED=NO build
+          xcrun simctl boot "$DEVICE_UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_UDID" -b
+          APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/SampleAppiOS-Swift.app"
+          test -d "$APP_PATH"
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
+          xcrun simctl install "$DEVICE_UDID" "$APP_PATH"
+          xcrun simctl launch "$DEVICE_UDID" "$BUNDLE_ID"
+          mkdir -p "$RUNNER_TEMP/sample-ios-smoke"
+          xcrun simctl io "$DEVICE_UDID" screenshot "$RUNNER_TEMP/sample-ios-smoke/launch.png"
+          test -s "$RUNNER_TEMP/sample-ios-smoke/launch.png"
+          echo "PASS: installed and launched $BUNDLE_ID on simulator $DEVICE_UDID"
+
+      - name: Upload simulator launch screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sample-ios-simulator-launch
+          path: ${{ runner.temp }}/sample-ios-smoke/launch.png
+          if-no-files-found: ignore
