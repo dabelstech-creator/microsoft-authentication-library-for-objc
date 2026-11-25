@@ -52,7 +52,7 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
         let provider = LifecycleMockEmailProvider()
         // Give this test its own persistent PostgreSQL rate-limit bucket.
         // XCTVapor's TestingHTTPRequest does not expose remoteAddress.
-        let testRateLimitIdentity = "registration-lifecycle-\\(UUID().uuidString)"
+        let testRateLimitIdentity = "registration-lifecycle-\(UUID().uuidString)"
         try await configure(
             app,
             emailSender: { email, subject, actionPath, token, _ in
@@ -69,13 +69,6 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
         // Registration persists only a disposable .example.test identity and
         // routes verification delivery to the in-process mock provider.
         try await app.test(.POST, "v1/auth/register", beforeRequest: { request in
-            // Use a fresh RFC 5737 documentation address on every run.
-            // The rate-limit bucket is persisted in PostgreSQL, so a fixed
-            // synthetic address would collide when CI reruns this test.
-            let testAddress = [
-                "192.0.2", "198.51.100", "203.0.113"
-            ][Int.random(in: 0..<3)] + ".\(Int.random(in: 1...254))"
-            request.remoteAddress = try SocketAddress(ipAddress: testAddress, port: 12345)
             try request.content.encode(credentials)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
