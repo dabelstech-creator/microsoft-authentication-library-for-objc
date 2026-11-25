@@ -74,10 +74,11 @@ final class AuthPlatformAPI {
 
     /// Exchanges an External ID API access token for an AuthPlatform session.
     /// The server validates signature, issuer, audience, tenant, and delegated scope.
-    func exchangeMicrosoft(accessToken: String) async throws -> AuthTokenResponse {
+    func exchangeMicrosoft(accessToken: String, idToken: String) async throws -> AuthTokenResponse {
         var request = URLRequest(url: baseURL.appendingPathComponent("v1").appendingPathComponent("auth").appendingPathComponent("microsoft").appendingPathComponent("exchange"))
         request.httpMethod = "POST"
         request.setValue("Bearer \(accessToken)", forHTTPHeaderField: "Authorization")
+        request.setValue(idToken, forHTTPHeaderField: "X-Microsoft-ID-Token")
         let (data, response) = try await session.data(for: request)
         try Self.validate(response: response, data: data)
         return try JSONDecoder().decode(AuthTokenResponse.self, from: data)
