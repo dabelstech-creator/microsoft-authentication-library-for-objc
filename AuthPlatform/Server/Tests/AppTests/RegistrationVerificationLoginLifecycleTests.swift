@@ -63,7 +63,7 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
         try await app.autoMigrate()
 
         let email = "auth-lifecycle-\(UUID().uuidString.lowercased())@example.test"
-        let password = "LifecyclePassword123"
+        let password = "Lifecycle-\(UUID().uuidString)-Test"
         let credentials = LifecycleCredentials(email: email, password: password)
 
         // Registration persists only a disposable .example.test identity and
