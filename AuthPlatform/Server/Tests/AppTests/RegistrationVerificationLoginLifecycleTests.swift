@@ -62,10 +62,13 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
         // Registration persists only a disposable .example.test identity and
         // routes verification delivery to the in-process mock provider.
         try await app.test(.POST, "v1/auth/register", beforeRequest: { request in
-            // Use a dedicated synthetic peer address so this test does not
-            // consume the shared registration rate-limit bucket used by the
-            // other integration tests.
-            request.remoteAddress = try SocketAddress(ipAddress: "192.0.2.42", port: 12345)
+            // Use a fresh RFC 5737 documentation address on every run.
+            // The rate-limit bucket is persisted in PostgreSQL, so a fixed
+            // synthetic address would collide when CI reruns this test.
+            let testAddress = [
+                "192.0.2", "198.51.100", "203.0.113"
+            ][Int.random(in: 0..<3)] + ".\(Int.random(in: 1...254))"
+            request.remoteAddress = try SocketAddress(ipAddress: testAddress, port: 12345)
             try request.content.encode(credentials)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
