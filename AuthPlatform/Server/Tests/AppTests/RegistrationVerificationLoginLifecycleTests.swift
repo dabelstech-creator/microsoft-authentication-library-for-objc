@@ -67,8 +67,10 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
             XCTAssertEqual(response.status, .ok)
         })
 
-        XCTAssertEqual(await provider.deliveryCount, 1)
-        let verificationToken = try XCTUnwrap(await provider.verificationToken(for: email))
+        let firstDeliveryCount = await provider.deliveryCount
+        XCTAssertEqual(firstDeliveryCount, 1)
+        let capturedVerificationToken = await provider.verificationToken(for: email)
+        let verificationToken = try XCTUnwrap(capturedVerificationToken)
 
         // Unverified accounts must not be able to obtain a session.
         try await app.test(.POST, "v1/auth/login", beforeRequest: { request in
@@ -133,6 +135,7 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
 
         // Only the initial registration sends email; login and refresh never
         // invoke the email provider.
-        XCTAssertEqual(await provider.deliveryCount, 1)
+        let finalDeliveryCount = await provider.deliveryCount
+        XCTAssertEqual(finalDeliveryCount, 1)
     }
 }
