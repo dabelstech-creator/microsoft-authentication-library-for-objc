@@ -214,3 +214,15 @@ If you find a security issue with our libraries or services please report it to 
 ## License
 
 Copyright © Microsoft Corporation.  All rights reserved. Licensed under the MIT License (the “License”).
+
+
+## Microsoft Entra External ID (customer identity)
+
+A browser-delegated CIAM integration guide, React/MSAL Browser PKCE sample, iOS/MSAL sample, and environment template are available:
+
+- [External ID integration and security guide](docs/entra-external-id/README.md)
+- [React SPA MSAL configuration](samples/entra-external-id/web/msalConfig.ts)
+- [iOS Swift MSAL integration](samples/entra-external-id/ios/ExternalIDAuth.swift)
+- [Environment template](.env.external-id.example)
+
+The guide documents current product boundaries, including the fact that External ID built-in password reset uses email OTP or SMS rather than TOTP. It describes the Azure AD B2C custom-policy alternative when TOTP-gated password recovery is mandatory.

@@ -1,5 +1,6 @@
 import LocalAuthentication
 import SwiftUI
+import UIKit
 
 @main
 struct AuthPlatformApp: App {
@@ -19,6 +20,8 @@ private struct AuthenticationDemoView: View {
     @State private var signedIn = false
     @State private var currentAccessToken = ""
     @State private var workosSignedIn = false
+    @State private var deviceCodePrompt: EntraDeviceCodePrompt?
+    @State private var deviceCodeTask: Task<Void, Never>?
     @State private var status = "Sign in to your AuthPlatform account."
     @State private var isBusy = false
 
@@ -43,6 +46,48 @@ private struct AuthenticationDemoView: View {
                         if isBusy { ProgressView() } else { Text("Sign in securely") }
                     }
                     .disabled(isBusy || username.isEmpty || password.isEmpty)
+                }
+
+                Section("Microsoft Entra External ID") {
+                    Button {
+                        startMicrosoftDeviceCodeSignIn()
+                    } label: {
+                        if isBusy && deviceCodeTask != nil {
+                            ProgressView()
+                        } else {
+                            Text("Continue with Microsoft (device code)")
+                        }
+                    }
+                    .disabled(isBusy || signedIn)
+
+                    if let prompt = deviceCodePrompt {
+                        VStack(alignment: .leading, spacing: 10) {
+                            Text("Enter this code")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(prompt.userCode)
+                                .font(.system(size: 28, weight: .bold, design: .monospaced))
+                                .textSelection(.enabled)
+                                .accessibilityLabel("Microsoft sign-in code \(prompt.userCode)")
+                            Button("Copy code") {
+                                UIPasteboard.general.string = prompt.userCode
+                                status = "Code copied. Complete Microsoft sign-in in the browser, then return to this app."
+                            }
+                            Link("Open Microsoft verification page", destination: prompt.verificationURL)
+                            Text(prompt.message)
+                                .font(.footnote)
+                            Text("Expires at \(prompt.expiresAt.formatted(date: .omitted, time: .shortened))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Button("Cancel Microsoft sign-in", role: .cancel) {
+                                deviceCodeTask?.cancel()
+                                deviceCodeTask = nil
+                                deviceCodePrompt = nil
+                                isBusy = false
+                                status = "Microsoft sign-in cancelled."
+                            }
+                        }
+                    }
                 }
 
                 Section("WorkOS AuthKit") {
@@ -119,6 +164,48 @@ private struct AuthenticationDemoView: View {
             status = "Signed in. Your refresh token is stored in the shared Keychain."
         } catch {
             status = error.localizedDescription
+        }
+    }
+
+    private func startMicrosoftDeviceCodeSignIn() {
+        guard deviceCodeTask == nil else { return }
+        isBusy = true
+        status = "Requesting a Microsoft device sign-in code…"
+        deviceCodePrompt = nil
+
+        deviceCodeTask = Task {
+            defer {
+                isBusy = false
+                deviceCodeTask = nil
+            }
+            do {
+                let service = EntraDeviceCodeAuthService()
+                let microsoftTokens = try await service.signIn { prompt in
+                    deviceCodePrompt = prompt
+                    status = "Enter the displayed code on Microsoft's verification page. Return here after authentication."
+                }
+
+                let api = try AuthPlatformAPI()
+                let appSession = try await api.exchangeMicrosoft(
+                    accessToken: microsoftTokens.accessToken,
+                    idToken: microsoftTokens.idToken
+                )
+                guard appSession.emailVerified else {
+                    status = "Your Microsoft identity must have a verified email address."
+                    deviceCodePrompt = nil
+                    return
+                }
+
+                try AuthSessionVault.save(refreshToken: appSession.refreshToken)
+                currentAccessToken = appSession.accessToken
+                signedIn = true
+                deviceCodePrompt = nil
+                status = "Microsoft sign-in completed. AuthPlatform session stored securely in Keychain."
+            } catch is CancellationError {
+                status = "Microsoft sign-in cancelled."
+            } catch {
+                status = error.localizedDescription
+            }
         }
     }
 
