@@ -117,10 +117,11 @@ func verifyMicrosoftExternalIDTokens(
         throw Abort(.internalServerError, reason: "MICROSOFT_API_SCOPE_NAME is invalid.")
     }
 
+    let normalizedTenantID = tenantID.lowercased()
     let authenticationHost = "\(tenantSubdomain.lowercased()).ciamlogin.com"
-    let issuerHost = "\(tenantID.lowercased()).ciamlogin.com"
-    let expectedIssuer = "https://\(issuerHost)/\(tenantID)/v2.0"
-    let discoveryURL = "https://\(authenticationHost)/\(tenantID)/v2.0/.well-known/openid-configuration"
+    let issuerHost = "\(normalizedTenantID).ciamlogin.com"
+    let expectedIssuer = "https://\(issuerHost)/\(normalizedTenantID)/v2.0"
+    let discoveryURL = "https://\(authenticationHost)/\(normalizedTenantID)/v2.0/.well-known/openid-configuration"
     let discoveryResponse = try await request.client.get(URI(string: discoveryURL))
     guard discoveryResponse.status == .ok else {
         request.logger.warning("Microsoft External ID discovery returned HTTP \(discoveryResponse.status.code).")
