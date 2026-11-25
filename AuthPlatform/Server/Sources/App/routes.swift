@@ -905,7 +905,17 @@ func routes(_ app: Application) throws {
         guard let accessToken = bearerToken(from: request) else {
             throw Abort(.unauthorized, reason: "A Microsoft External ID API access token is required.")
         }
-        let identity = try await verifyMicrosoftExternalIDAccessToken(accessToken, on: request)
+        guard let idToken = request.headers.first(name: "X-Microsoft-ID-Token"),
+              !idToken.isEmpty,
+              idToken.count <= 32_768
+        else {
+            throw Abort(.unauthorized, reason: "A Microsoft External ID ID token is required for identity verification.")
+        }
+        let identity = try await verifyMicrosoftExternalIDTokens(
+            accessToken: accessToken,
+            idToken: idToken,
+            on: request
+        )
 
         // Serialize first-login provisioning by the stable External ID issuer/subject pair.
         // Never link an external identity to a local account solely because emails match.
