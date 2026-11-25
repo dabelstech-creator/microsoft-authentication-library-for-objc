@@ -109,7 +109,8 @@ func verifyMicrosoftExternalIDTokens(
           let clientID = Environment.get("MICROSOFT_CLIENT_ID"),
           UUID(uuidString: clientID) != nil,
           let expectedAudience = Environment.get("MICROSOFT_API_AUDIENCE"),
-          !expectedAudience.isEmpty
+          !expectedAudience.isEmpty,
+          Environment.get("MICROSOFT_EMAIL_VERIFICATION_ENFORCED") == "true"
     else {
         throw Abort(.serviceUnavailable, reason: "Microsoft External ID API validation is not configured.")
     }
@@ -164,7 +165,7 @@ func verifyMicrosoftExternalIDTokens(
           let identityObjectID = identityClaims.objectID,
           !apiObjectID.isEmpty,
           apiObjectID == identityObjectID,
-          identityClaims.emailVerified == true,
+          identityClaims.emailVerified != false,
           let rawEmail = identityClaims.email,
           let email = normalizedEmail(rawEmail)
     else {
