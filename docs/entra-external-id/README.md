@@ -93,10 +93,10 @@ The AuthPlatform host app includes an optional **Continue with Microsoft (device
 1. Configure the iOS app Info.plist keys `ENTRA_TENANT_SUBDOMAIN`, `ENTRA_TENANT_ID`, `ENTRA_CLIENT_ID`, and `ENTRA_API_SCOPE` using the public iOS app registration and the API's delegated scope.
 2. Configure the iOS app registration as a public client and enable the device authorization grant for the external tenant. Do not create or ship a client secret.
 3. Expose a delegated API scope such as `access_as_user` on the AuthPlatform API app registration and grant the iOS client permission to request it.
-4. Configure the API's `MICROSOFT_TENANT_SUBDOMAIN`, `MICROSOFT_TENANT_ID`, `MICROSOFT_API_AUDIENCE`, and `MICROSOFT_API_SCOPE_NAME` server-side.
+4. Configure the API's `MICROSOFT_TENANT_SUBDOMAIN`, `MICROSOFT_TENANT_ID`, `MICROSOFT_CLIENT_ID` (the iOS public client ID), `MICROSOFT_API_AUDIENCE` (the API app ID/audience), and `MICROSOFT_API_SCOPE_NAME` server-side.
 5. The app displays the short-lived user code and Microsoft verification URL. The user can copy the code and open the verification page on the same iPhone or a second device. Microsoft-hosted sign-in, email verification, and configured MFA happen on Microsoft's page.
 6. The app polls at the server-provided interval, handles `authorization_pending` and `slow_down`, stops on cancellation, decline, or expiry, and keeps the device code and access token in memory only.
-7. On success, the app sends the API access token over TLS to `POST /v1/auth/microsoft/exchange`. The Vapor API validates token signature, issuer, tenant, audience, delegated scope, expiry, and verified-email claim before mapping the identity and issuing an AuthPlatform session.
+7. On success, the app sends the API access token as the bearer credential and the ID token in `X-Microsoft-ID-Token` over TLS to `POST /v1/auth/microsoft/exchange`. The Vapor API validates both signatures and lifetimes, checks the access token's API audience and delegated scope, checks the ID token's iOS client audience and `email_verified` claim, and requires matching tenant and `oid` claims before mapping the identity and issuing an AuthPlatform session. The ID token is used only for this identity exchange; it is not accepted as an API bearer token.
 
 Device flow is intended for devices with limited input or browser capability. On iPhone, browser-delegated MSAL authorization code with PKCE is normally the better user experience. The device-code option is included because it was explicitly requested; it is not proof of device compliance or managed-device status.
 
@@ -109,7 +109,7 @@ The API must independently validate each bearer access token using OpenID Connec
 - required delegated scope or app role;
 - tenant and subject identifiers for account mapping.
 
-Use a maintained JWT/OIDC validation library. Cache JWKS according to HTTP cache headers and refresh on an unknown key ID. Do not trust client-supplied email or profile fields without validating token claims. Apply authorization checks at the resource level, rate-limit sign-in-adjacent endpoints, and audit security events without recording credentials, OTPs, tokens, or QR secrets.
+Use a maintained JWT/OIDC validation library. The device-flow exchange validates the API access token and ID token independently, requires their `oid` and tenant claims to match, and requires `email_verified=true` in the ID token. Cache JWKS according to HTTP cache headers and refresh on an unknown key ID. Do not trust client-supplied email or profile fields without validating token claims. Apply authorization checks at the resource level, rate-limit sign-in-adjacent endpoints, and audit security events without recording credentials, OTPs, tokens, or QR secrets.
 
 ## 8. Environment variables
 
