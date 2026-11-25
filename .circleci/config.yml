@@ -1,0 +1,28 @@
+version: 2.1
+
+jobs:
+  validate-msal:
+    macos:
+      xcode: 27.1.0
+    resource_class: m4pro.medium
+    environment:
+      IOS_SIM_DEVICE: "iPhone 17"
+      IOS_SIM_OS: "27.1"
+    steps:
+      - checkout
+      - run:
+          name: Initialize repository submodules
+          command: git submodule update --init --recursive
+      - run:
+          name: Verify Xcode and simulator availability
+          command: |
+            xcodebuild -version
+            xcrun simctl list devices available
+      - run:
+          name: Build and test iOS and macOS frameworks
+          command: ./build.py --targets iosFramework macFramework --no-xcpretty
+
+workflows:
+  msal-validation:
+    jobs:
+      - validate-msal
