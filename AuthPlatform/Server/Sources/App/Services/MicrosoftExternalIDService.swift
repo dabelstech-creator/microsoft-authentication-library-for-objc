@@ -121,8 +121,7 @@ func verifyMicrosoftExternalIDTokens(
 
     let normalizedTenantID = tenantID.lowercased()
     let authenticationHost = "\(tenantSubdomain.lowercased()).ciamlogin.com"
-    let issuerHost = "\(normalizedTenantID).ciamlogin.com"
-    let expectedIssuer = "https://\(issuerHost)/\(normalizedTenantID)/v2.0"
+    let tenantIDHost = "\(normalizedTenantID).ciamlogin.com"
     let discoveryURL = "https://\(authenticationHost)/\(normalizedTenantID)/v2.0/.well-known/openid-configuration"
     let discoveryResponse = try await request.client.get(URI(string: discoveryURL))
     guard discoveryResponse.status == .ok else {
@@ -131,10 +130,13 @@ func verifyMicrosoftExternalIDTokens(
     }
 
     let discovery = try discoveryResponse.content.decode(OIDCDiscoveryDocument.self)
-    guard discovery.issuer == expectedIssuer,
+    guard let issuerURL = URL(string: discovery.issuer),
+          issuerURL.scheme == "https",
+          [authenticationHost, tenantIDHost].contains(issuerURL.host ?? ""),
+          ["/\(normalizedTenantID)/v2.0", "/\(normalizedTenantID)/v2.0/"].contains(issuerURL.path),
           let jwksURL = URL(string: discovery.jwksURI),
           jwksURL.scheme == "https",
-          jwksURL.host == issuerHost
+          [authenticationHost, tenantIDHost].contains(jwksURL.host ?? "")
     else {
         throw Abort(.badGateway, reason: "Microsoft External ID discovery metadata did not match the configured tenant.")
     }
@@ -150,8 +152,8 @@ func verifyMicrosoftExternalIDTokens(
     let apiClaims = try await keys.verify(accessToken, as: MicrosoftExternalIDAccessToken.self)
     let identityClaims = try await keys.verify(idToken, as: MicrosoftExternalIDIdentityToken.self)
 
-    guard apiClaims.issuer.value == expectedIssuer,
-          identityClaims.issuer.value == expectedIssuer,
+    guard apiClaims.issuer.value == discovery.issuer,
+          identityClaims.issuer.value == discovery.issuer,
           apiClaims.tenantID.lowercased() == tenantID.lowercased(),
           identityClaims.tenantID.lowercased() == tenantID.lowercased(),
           apiClaims.audience.value.contains(expectedAudience),
