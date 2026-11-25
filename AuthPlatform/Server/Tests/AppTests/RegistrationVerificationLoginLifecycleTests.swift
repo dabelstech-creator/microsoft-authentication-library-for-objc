@@ -62,6 +62,10 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
         // Registration persists only a disposable .example.test identity and
         // routes verification delivery to the in-process mock provider.
         try await app.test(.POST, "v1/auth/register", beforeRequest: { request in
+            // Use a dedicated synthetic peer address so this test does not
+            // consume the shared registration rate-limit bucket used by the
+            // other integration tests.
+            request.remoteAddress = try SocketAddress(ipAddress: "192.0.2.42", port: 12345)
             try request.content.encode(credentials)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
@@ -101,7 +105,7 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
             try request.content.encode(credentials)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
-            initialAuth = try response.content.decode(LifecycleAuthResponse.self)
+            initialAuth = try? response.content.decode(LifecycleAuthResponse.self)
         })
         let issued = try XCTUnwrap(initialAuth)
         XCTAssertTrue(issued.emailVerified)
@@ -115,7 +119,7 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
             try request.content.encode(LifecycleRefreshPayload(refreshToken: issued.refreshToken))
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
-            rotatedAuth = try response.content.decode(LifecycleAuthResponse.self)
+            rotatedAuth = try? response.content.decode(LifecycleAuthResponse.self)
         })
         let rotated = try XCTUnwrap(rotatedAuth)
         XCTAssertEqual(rotated.userID, issued.userID)
@@ -129,7 +133,7 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
             try request.content.encode(LifecycleRefreshPayload(refreshToken: rotated.refreshToken))
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
-            secondRotation = try response.content.decode(LifecycleAuthResponse.self)
+            secondRotation = try? response.content.decode(LifecycleAuthResponse.self)
         })
         XCTAssertNotEqual(try XCTUnwrap(secondRotation).refreshToken, rotated.refreshToken)
 
