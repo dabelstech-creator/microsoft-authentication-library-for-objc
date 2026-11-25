@@ -6,6 +6,14 @@
     <string>auth.moredesa.com</string>
     <key>AUTH_API_BASE_URL</key>
     <string>https://auth.moredesa.com</string>
+    <key>ENTRA_TENANT_SUBDOMAIN</key>
+    <string>your-external-tenant-subdomain</string>
+    <key>ENTRA_TENANT_ID</key>
+    <string>00000000-0000-0000-0000-000000000000</string>
+    <key>ENTRA_CLIENT_ID</key>
+    <string>00000000-0000-0000-0000-000000000000</string>
+    <key>ENTRA_API_SCOPE</key>
+    <string>api://00000000-0000-0000-0000-000000000000/access_as_user</string>
     <key>AUTH_WORKOS_CLIENT_ID</key>
     <string>client_01KY8YVZNZ4XWZAT0401X9CR4W</string>
     <key>AUTH_WORKOS_REDIRECT_URI</key>
