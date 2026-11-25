@@ -180,13 +180,16 @@ private struct AuthenticationDemoView: View {
             }
             do {
                 let service = EntraDeviceCodeAuthService()
-                let microsoftAccessToken = try await service.signIn { prompt in
+                let microsoftTokens = try await service.signIn { prompt in
                     deviceCodePrompt = prompt
                     status = "Enter the displayed code on Microsoft's verification page. Return here after authentication."
                 }
 
                 let api = try AuthPlatformAPI()
-                let appSession = try await api.exchangeMicrosoft(accessToken: microsoftAccessToken)
+                let appSession = try await api.exchangeMicrosoft(
+                    accessToken: microsoftTokens.accessToken,
+                    idToken: microsoftTokens.idToken
+                )
                 guard appSession.emailVerified else {
                     status = "Your Microsoft identity must have a verified email address."
                     deviceCodePrompt = nil
