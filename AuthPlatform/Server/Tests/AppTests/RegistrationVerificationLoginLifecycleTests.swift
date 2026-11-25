@@ -50,9 +50,16 @@ final class RegistrationVerificationLoginLifecycleTests: XCTestCase {
         addTeardownBlock { try await app.asyncShutdown() }
 
         let provider = LifecycleMockEmailProvider()
-        try await configure(app, emailSender: { email, subject, actionPath, token, _ in
-            await provider.deliver(email: email, subject: subject, path: actionPath, token: token)
-        })
+        // Give this test its own persistent PostgreSQL rate-limit bucket.
+        // XCTVapor's TestingHTTPRequest does not expose remoteAddress.
+        let testRateLimitIdentity = "registration-lifecycle-\\(UUID().uuidString)"
+        try await configure(
+            app,
+            emailSender: { email, subject, actionPath, token, _ in
+                await provider.deliver(email: email, subject: subject, path: actionPath, token: token)
+            },
+            rateLimitClientIdentifier: { _ in testRateLimitIdentity }
+        )
         try await app.autoMigrate()
 
         let email = "auth-lifecycle-\(UUID().uuidString.lowercased())@example.test"
