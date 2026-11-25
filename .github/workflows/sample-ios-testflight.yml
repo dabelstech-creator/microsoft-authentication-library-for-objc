@@ -36,13 +36,46 @@ jobs:
 
       - name: Build Swift sample for iOS Simulator
         run: |
+          set -euo pipefail
+          PROJECT="Samples/ios/SampleAppiOS-Swift/SampleAppiOS-Swift.xcodeproj"
+          DERIVED_DATA="$RUNNER_TEMP/SampleAppDerivedData"
           xcodebuild \
-            -project Samples/ios/SampleAppiOS-Swift/SampleAppiOS-Swift.xcodeproj \
+            -project "$PROJECT" \
             -scheme SampleAppiOS-Swift \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath "$DERIVED_DATA" \
             CODE_SIGNING_ALLOWED=NO \
             build
+
+          DEVICE_UDID="$(xcrun simctl list devices available -j | /usr/bin/python3 -c '
+          import json, sys
+          data = json.load(sys.stdin)
+          devices = [d for runtime, entries in data["devices"].items()
+                     if runtime.startswith("com.apple.CoreSimulator.SimRuntime.iOS-")
+                     for d in entries if d.get("isAvailable") and d["name"].startswith("iPhone")]
+          if not devices:
+              raise SystemExit("No available iPhone simulator runtime/device found")
+          print(devices[0]["udid"])
+          ')"
+          xcrun simctl boot "$DEVICE_UDID" 2>/dev/null || true
+          xcrun simctl bootstatus "$DEVICE_UDID" -b
+
+          APP_PATH="$DERIVED_DATA/Build/Products/Debug-iphonesimulator/SampleAppiOS-Swift.app"
+          test -d "$APP_PATH"
+          BUNDLE_ID=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$APP_PATH/Info.plist")
+          xcrun simctl install "$DEVICE_UDID" "$APP_PATH"
+          xcrun simctl launch "$DEVICE_UDID" "$BUNDLE_ID"
+          mkdir -p "$RUNNER_TEMP/sample-ios-smoke"
+          xcrun simctl io "$DEVICE_UDID" screenshot "$RUNNER_TEMP/sample-ios-smoke/launch.png"
+          test -s "$RUNNER_TEMP/sample-ios-smoke/launch.png"
+          echo "Simulator launch smoke test passed for $BUNDLE_ID on $DEVICE_UDID"
+
+          if grep -q '<TestableReference' Samples/ios/SampleAppiOS-Swift/SampleAppiOS-Swift.xcodeproj/xcshareddata/xcschemes/SampleAppiOS-Swift.xcscheme; then
+            echo "The sample scheme declares test targets; run xcodebuild test in a future dedicated test step."
+          else
+            echo "::notice::The sample scheme currently declares no test targets; simulator install/launch is the available automated smoke test."
+          fi
 
   testflight:
     if: github.event_name == 'workflow_dispatch' && inputs.upload_to_testflight
