@@ -127,18 +127,18 @@ final class RegistrationEmailDeliveryTests: XCTestCase {
         let persistedUser = try XCTUnwrap(persistedUserResult)
         let originalPasswordHash = try XCTUnwrap(persistedUser.passwordHash)
         let retryPayload = RegistrationPayload(email: email, password: "DifferentPassword456")
-        async let firstRetry: Void = app.test(.POST, "v1/auth/register", beforeRequest: { request in
+        async let firstRetry = app.test(.POST, "v1/auth/register", beforeRequest: { request in
             try request.content.encode(retryPayload)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
         })
-        async let secondRetry: Void = app.test(.POST, "v1/auth/register", beforeRequest: { request in
+        async let secondRetry = app.test(.POST, "v1/auth/register", beforeRequest: { request in
             try request.content.encode(retryPayload)
         }, afterResponse: { response async in
             XCTAssertEqual(response.status, .ok)
         })
-        try await firstRetry
-        try await secondRetry
+        _ = try await firstRetry
+        _ = try await secondRetry
 
         let users = try await User.query(on: app.db)
             .filter(\.$emailNormalized == email).all()
