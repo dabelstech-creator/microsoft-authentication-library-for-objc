@@ -16,6 +16,7 @@ func configure(_ app: Application, emailSender: AuthEmailSender? = nil) async th
     app.migrations.add(AddRefreshTokenHistory())
     app.migrations.add(AddAuthSecurityTables())
     app.migrations.add(CreateEncryptedVaultItems())
+    app.migrations.add(AddEncryptedVaultItemVersion())
     app.middleware.use(AuthRateLimitMiddleware(maximumRequests: 120, windowSeconds: 60))
     try routes(app, emailSender: emailSender)
 }

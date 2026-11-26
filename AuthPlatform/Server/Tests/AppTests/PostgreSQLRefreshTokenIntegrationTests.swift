@@ -61,6 +61,59 @@ final class PostgreSQLRefreshTokenIntegrationTests: XCTestCase {
                         "Replay detection must revoke the entire token family.")
     }
 
+    func testLogoutAtomicallyRevokesRefreshRecordAndSession() async throws {
+        guard Environment.get("DATABASE_URL") != nil else {
+            throw XCTSkip("Set DATABASE_URL to a disposable PostgreSQL test database.")
+        }
+
+        let app = try await Application.make(.testing)
+        addTeardownBlock { try await app.asyncShutdown() }
+        try await configure(app)
+        try await app.autoMigrate()
+
+        let user = User()
+        user.emailNormalized = "logout-\(UUID().uuidString.lowercased())@example.test"
+        user.emailVerifiedAt = Date()
+        user.passwordHash = "unused-by-logout-route"
+        try await user.save(on: app.db)
+
+        let rawRefreshToken = secureToken()
+        let familyID = UUID()
+        let session = AuthSession()
+        session.userID = try XCTUnwrap(user.id)
+        session.familyID = familyID
+        session.accessTokenHash = tokenDigest(secureToken())
+        session.accessExpiresAt = Date().addingTimeInterval(900)
+        session.refreshTokenHash = tokenDigest(rawRefreshToken)
+        session.expiresAt = Date().addingTimeInterval(86_400)
+        try await session.save(on: app.db)
+        let sessionID = try XCTUnwrap(session.id)
+
+        let record = RefreshTokenRecord()
+        record.sessionID = sessionID
+        record.familyID = familyID
+        record.tokenHash = tokenDigest(rawRefreshToken)
+        record.expiresAt = Date().addingTimeInterval(86_400)
+        try await record.save(on: app.db)
+
+        try await app.test(.POST, "v1/auth/logout", beforeRequest: { request in
+            try request.content.encode(RefreshPayload(refreshToken: rawRefreshToken))
+        }, afterResponse: { response async in
+            XCTAssertEqual(response.status, .noContent)
+        })
+
+        let sessionAfterLogout = try await AuthSession.find(sessionID, on: app.db)
+        let revokedSession = try XCTUnwrap(sessionAfterLogout)
+        let recordAfterLogout = try await RefreshTokenRecord.query(on: app.db)
+            .filter(\.$tokenHash == tokenDigest(rawRefreshToken))
+            .first()
+        let revokedRecord = try XCTUnwrap(recordAfterLogout)
+        XCTAssertNotNil(revokedSession.revokedAt)
+        XCTAssertNotNil(revokedRecord.revokedAt)
+        let refreshStatus = try await refresh(app, token: rawRefreshToken)
+        XCTAssertEqual(refreshStatus, .unauthorized)
+    }
+
     private func refresh(_ app: Application, token: String) async throws -> HTTPStatus {
         var responseStatus: HTTPStatus = .internalServerError
         try await app.test(.POST, "v1/auth/refresh", beforeRequest: { request in
