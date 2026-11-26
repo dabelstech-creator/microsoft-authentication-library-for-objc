@@ -1,0 +1,15 @@
+{
+  "name": "authplatform-telegram-coordinator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Telegram Serverless coordinator for AuthPlatform",
+  "devDependencies": {
+    "@tgcloud/cli": "^0.2.0"
+  },
+  "scripts": {
+    "status": "tgcloud status",
+    "diff": "tgcloud diff",
+    "deploy": "tgcloud push",
+    "webhook:status": "tgcloud webhook"
+  }
+}
