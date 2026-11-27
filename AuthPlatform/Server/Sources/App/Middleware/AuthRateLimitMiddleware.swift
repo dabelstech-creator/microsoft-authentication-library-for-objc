@@ -23,6 +23,7 @@ func authRateLimit(for path: String, fallback: Int) -> Int {
 struct AuthRateLimitMiddleware: AsyncMiddleware {
     let maximumRequests: Int
     let windowSeconds: Int
+    let clientIdentifier: @Sendable (Request) -> String
 
     func respond(to request: Request, chainingTo next: AsyncResponder) async throws -> Response {
         if request.url.path == "/health" || request.url.path == "/v1/auth/capabilities" {
@@ -33,7 +34,7 @@ struct AuthRateLimitMiddleware: AsyncMiddleware {
             throw Abort(.internalServerError, reason: "Rate limiting requires the PostgreSQL SQL driver.")
         }
 
-        let client = request.remoteAddress?.ipAddress ?? "unknown"
+        let client = clientIdentifier(request)
         let routeKey = "\(request.method.rawValue):\(request.url.path)"
         let bucket = SHA256.hash(data: Data("\(client):\(routeKey)".utf8))
             .map { String(format: "%02x", $0) }.joined()

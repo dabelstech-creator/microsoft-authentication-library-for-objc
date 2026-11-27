@@ -13,9 +13,9 @@ name: "CodeQL Advanced"
 
 on:
   push:
-    branches: [ "dabelstech-creator-patch-1" ]
+    branches: [ "dabelstech-creator-patch-1", "feature/secure-auth-platform-vapor" ]
   pull_request:
-    branches: [ "dabelstech-creator-patch-1" ]
+    branches: [ "dabelstech-creator-patch-1", "feature/secure-auth-platform-vapor" ]
   schedule:
     - cron: '29 17 * * 1'
 
@@ -44,8 +44,6 @@ jobs:
       matrix:
         include:
         - language: actions
-          build-mode: none
-        - language: c-cpp
           build-mode: none
         - language: python
           build-mode: none

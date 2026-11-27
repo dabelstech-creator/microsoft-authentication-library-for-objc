@@ -2,7 +2,11 @@ import Fluent
 import FluentPostgresDriver
 import Vapor
 
-func configure(_ app: Application, emailSender: AuthEmailSender? = nil) async throws {
+func configure(
+    _ app: Application,
+    emailSender: AuthEmailSender? = nil,
+    rateLimitClientIdentifier: (@Sendable (Request) -> String)? = nil
+) async throws {
     guard let databaseURL = Environment.get("DATABASE_URL"), !databaseURL.isEmpty else {
         throw Abort(.internalServerError, reason: "DATABASE_URL must be configured as a PostgreSQL URL.")
     }
@@ -16,6 +20,12 @@ func configure(_ app: Application, emailSender: AuthEmailSender? = nil) async th
     app.migrations.add(AddRefreshTokenHistory())
     app.migrations.add(AddAuthSecurityTables())
     app.migrations.add(CreateEncryptedVaultItems())
-    app.middleware.use(AuthRateLimitMiddleware(maximumRequests: 120, windowSeconds: 60))
+    let resolveRateLimitClient: @Sendable (Request) -> String = rateLimitClientIdentifier
+        ?? { $0.remoteAddress?.ipAddress ?? "unknown" }
+    app.middleware.use(AuthRateLimitMiddleware(
+        maximumRequests: 120,
+        windowSeconds: 60,
+        clientIdentifier: resolveRateLimitClient
+    ))
     try routes(app, emailSender: emailSender)
 }
